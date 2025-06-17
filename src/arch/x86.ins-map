@@ -1,0 +1,12 @@
+
+encodings X86Encoding (width: u16, largest_gpr: X86RegisterClass) {
+    real (width: 16, largest_gpr: X86RegisterClass::Word)
+    protected (width: 32, largest_gpr: X86RegisterClass::Double)
+    long (width: 64, largest_gpr: X86RegisterClass::Quad)
+}
+
+registers X86Register{
+    classes X86RegisterClass {
+
+    }
+}

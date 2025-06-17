@@ -1,0 +1,18 @@
+[package]
+name = "cmli"
+version = "0.1.0"
+edition = "2024"
+license = "BSD-2-Clause-Patent"
+
+[dependencies]
+cmli-derive = { version = "=0.1.0", path = "cmli-derive" }
+indexmap = "2.7.1"
+sym-gen = { git = "https://github.com/lccc-project/sym-gen.git" }
+with_builtin_macros = "0.1.0"
+
+[features]
+error-track-caller = []
+debug-error-track-caller = []
+
+[workspace]
+members = ["cmli-derive"]

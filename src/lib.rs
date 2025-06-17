@@ -1,0 +1,21 @@
+//!
+//! ## Features
+//! * `error-track-caller`: This allows extended debugging via the [`error::Error`] body by tracking the constructor source of errors.
+//! * `debug-error-track-caller`: Same as `error-track-caller` but only when debug assertions are enabled (note that this uses the setting for this crate, not the top level binary)
+//! Note that if both this and `error-track-caller` is on, `error-track-caller` prevails and constructor locations are tracked in all cases.
+
+pub mod arch;
+pub mod asm;
+pub mod compiler;
+pub mod encode;
+pub mod error;
+pub mod instr;
+pub mod intern;
+pub mod traits;
+pub mod xva;
+
+pub use error::Result;
+
+extern crate self as cmli;
+
+mod helpers;

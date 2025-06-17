@@ -1,0 +1,13 @@
+[package]
+name = "cmli-derive"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lccc-siphash = { git = "https://github.com/lccc-project/lccc-siphash.git", version = "0.1.0" }
+quote = "1.0.38"
+proc-macro2 = "1.0.92"
+itertools = "0.14.0"
+
+[lib]
+proc-macro = true
