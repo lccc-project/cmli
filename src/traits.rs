@@ -46,7 +46,7 @@ pub(crate) mod into_id {
     pub trait IdType: Copy + Eq + ::core::hash::Hash {}
 }
 
-pub unsafe trait AsU64 {
+pub unsafe trait AsU64: Sized {
     #[doc(hidden)]
     unsafe fn __value_from(v: u64) -> Option<Self>;
 }

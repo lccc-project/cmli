@@ -81,11 +81,11 @@ pub enum IdDowncastError {
 macro_rules! def_id_type {
     ($ty_name:ident) => {
         #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-        pub struct $ty_name(NonZeroU64, u64);
+        pub struct $ty_name(::core::num::NonZeroU64, u64);
 
         impl $ty_name {
             #[doc(hidden)]
-            pub const fn __new_unchecked(ty: NonZeroU64, n: u64) -> Self {
+            pub const fn __new_unchecked(ty: ::core::num::NonZeroU64, n: u64) -> Self {
                 Self(ty, n)
             }
 
@@ -107,7 +107,7 @@ macro_rules! def_id_type {
 
         impl $crate::traits::into_id::IdType for $ty_name {}
 
-        pub use comp_base_derive::$ty_name;
+        pub use cmli_derive::$ty_name;
     };
 }
 

@@ -1,5 +1,5 @@
 use crate::{
-    compiler::{PsuedoReg, RegisterType},
+    compiler::{PseudoReg, RegisterType},
     instr::InstructionId,
     intern::Symbol,
 };
@@ -19,24 +19,24 @@ pub enum Opcode {
     NoInit,
     ConstScalar(u128),
     ConstAddr(Symbol, u64),
-    Copy(PsuedoReg),
+    Copy(PseudoReg),
     LoadAddr(Symbol, u64, Order),
-    Load(PsuedoReg, Order),
+    Load(PseudoReg, Order),
     StoreAddr(Symbol, u64, Order),
-    Store(PsuedoReg, Order),
-    AddSigned(PsuedoReg, PsuedoReg),
-    AddUnsigned(PsuedoReg, PsuedoReg),
-    SubSigned(PsuedoReg, PsuedoReg),
-    SubUnsigned(PsuedoReg, PsuedoReg),
-    MulSigned(PsuedoReg, PsuedoReg),
+    Store(PseudoReg, Order),
+    AddSigned(PseudoReg, PseudoReg),
+    AddUnsigned(PseudoReg, PseudoReg),
+    SubSigned(PseudoReg, PseudoReg),
+    SubUnsigned(PseudoReg, PseudoReg),
+    MulSigned(PseudoReg, PseudoReg),
 
-    Native(InstructionId, Option<PsuedoReg>, Option<PseudoReg>),
+    Native(InstructionId, Option<PseudoReg>, Option<PseudoReg>),
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct XvaInstr {
-    pub dest: PsuedoReg,
-    pub aux: Option<PsuedoReg>,
+    pub dest: PseudoReg,
+    pub aux: Option<PseudoReg>,
     pub ty: RegisterType,
     pub op: Opcode,
 }

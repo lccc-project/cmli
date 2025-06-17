@@ -18,7 +18,7 @@ pub trait Compiler {
     }
 }
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-pub enum PsuedoReg {
+pub enum PseudoReg {
     Physical(RegisterId),
     Virtual(EmphemeralRegister),
 }
@@ -34,7 +34,7 @@ pub enum RegisterType {
     ArchSpecific(RegisterClassId),
 }
 
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MceInstr {
     Empty,
     Single(Instruction),

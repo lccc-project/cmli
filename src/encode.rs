@@ -3,7 +3,7 @@ use crate::{
     instr::{Address, Instruction},
 };
 
-pub use comp_base_derive::RelocId;
+def_id_type!(RelocId);
 
 pub trait InstrWrite: std::io::Write {}
 

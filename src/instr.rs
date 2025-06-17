@@ -1,4 +1,4 @@
-use std::{num::NonZeroU64, path::Prefix};
+use core::num::NonZeroU64;
 
 use indexmap::IndexMap;
 
@@ -21,7 +21,7 @@ pub trait Opcodes: Unique {
     fn make_printer(&self) -> Box<dyn Printer + '_>;
     fn make_encoder(&self) -> Box<dyn Encoder + '_>;
     fn make_decoder(&self) -> Option<Box<dyn Decoder + '_>>;
-    fn make_compiler(&self) -> Box<dyn Compiler + '_>;
+    fn make_compiler(&self) -> Option<Box<dyn Compiler + '_>>;
     fn reg_class(&self, reg: RegisterId) -> RegisterClassId;
 }
 

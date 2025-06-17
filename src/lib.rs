@@ -1,3 +1,4 @@
+#![feature(never_type, macro_metavar_expr)]
 //!
 //! ## Features
 //! * `error-track-caller`: This allows extended debugging via the [`error::Error`] body by tracking the constructor source of errors.

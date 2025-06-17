@@ -158,7 +158,7 @@ fn derive_impl<const N: usize>(item: TokenStream, loc: [&str; N], tr: &str) -> T
 }
 
 macro_rules! derive_traits {
-    ($($({$($path:ident)::+} ::)? $tr:ident),*) => {
+    ($($({$($path:ident)::+} ::)? $tr:ident),* $(,)?) => {
         $(#[proc_macro_derive($tr, attributes(cmli))]
         #[allow(nonstandard_style)]
         pub fn $tr(item: TokenStream) -> TokenStream {
@@ -179,5 +179,8 @@ derive_traits! {
     {instr}:: RegisterClassId,
     {instr}:: ExtendedConditionId,
     {instr}:: PrefixId,
-    {encode}:: RelocId
+    {instr}:: RelocTypeId,
+    {encode}:: RelocId,
+    {arch}:: MachId,
+    {arch}:: FeatureId,
 }
