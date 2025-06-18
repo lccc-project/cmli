@@ -184,3 +184,23 @@ derive_traits! {
     {arch}:: MachId,
     {arch}:: FeatureId,
 }
+
+#[proc_macro]
+pub fn compile_error_with_span(ts: TokenStream) -> TokenStream {
+    let ts: proc_macro2::TokenStream = ts.into();
+    let mut input = ts.into_iter();
+
+    let Some(span_source) = input.next() else {
+        panic!("Must have a valid span token")
+    };
+
+    match input.next() {
+        Some(proc_macro2::TokenTree::Punct(c)) if c.as_char() == ',' => (),
+        Some(tt) => panic!("Expected `,` not {tt}"),
+        None => (),
+    }
+
+    let span: proc_macro2::Span = span_source.span();
+    let rest = input.collect::<proc_macro2::TokenStream>();
+    quote::quote_spanned! {span => ::core::compile_error!(#rest);}.into()
+}
