@@ -260,5 +260,6 @@ macro_rules! instr_set {
                 $($tt)*
             }
         })*
-    }
+    };
+    {} => {};
 }
