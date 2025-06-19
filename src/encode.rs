@@ -1,7 +1,4 @@
-use crate::{
-    helpers::def_id_type,
-    instr::{Address, Instruction},
-};
+use crate::{helpers::def_id_type, instr::Instruction};
 
 def_id_type!(RelocId);
 

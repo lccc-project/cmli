@@ -114,6 +114,45 @@ macro_rules! instr_set {
     };
     {
         $(#[$meta:meta])*
+        prefixes $enum_name:ident $([$($extra_properties_names:ident : $extra_properties_tys:ty $(= $extra_properties_defauit:expr)? ),* $(,)?])? : $opcode_ty:ty {
+            $($prefix_name:ident ($name:literal) = $opcode:literal  $(($($extra_properties_value_names:ident : $extra_properties_value:expr),* $(,)?))?),* $(,)?
+        }
+    } => {
+        $(#[$meta])*
+        #[derive($crate::instr::PrefixId, Copy, Clone, Hash, PartialEq, Eq)]
+        pub enum $enum_name {
+            $($prefix_name),*
+        }
+
+        impl $enum_name {
+            pub const fn name(&self) -> &'static str {
+                match self {
+                    $(Self:: $prefix_name => $name),*
+                }
+            }
+
+            pub fn from_name(name: &'static str) -> Option<Self> {
+                match name {
+                    $($name => Some(Self:: $prefix_name),)*
+                    _ => None
+                }
+            }
+
+            pub const fn opcode(&self) -> $opcode_ty {
+                match self {
+                    $(Self:: $prefix_name => $opcode),*
+                }
+            }
+        }
+
+        $crate::__def_extra_properties!{
+            $enum_name $([$($extra_properties_names : $extra_properties_tys $(= $extra_properties_defauit)? ),* ])? {
+                $($prefix_name $(($($extra_properties_value_names : $extra_properties_value),*))?),*
+            }
+        }
+    };
+    {
+        $(#[$meta:meta])*
         encoding $enum_name:ident $([$($extra_properties_names:ident : $extra_properties_tys:ty $(= $extra_properties_defauit:expr)? ),* $(,)?])? {
             $($encoding_name:ident $(($($extra_properties_value_names:ident : $extra_properties_value:expr),* $(,)?))?),* $(,)?
         }

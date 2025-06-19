@@ -1,5 +1,3 @@
-use std::num::NonZeroUsize;
-
 use sym_gen::def_pool;
 
 def_pool! {

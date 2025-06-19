@@ -9,9 +9,9 @@
 use std::hash::{Hash, Hasher};
 
 use helpers::{lit_u64, path};
-use proc_macro::{Delimiter, Span, TokenStream, TokenTree, quote};
+use proc_macro::{Delimiter, Span, TokenStream, TokenTree};
 
-use crate::helpers::next_ident;
+use crate::helpers::{hash_token_stream, next_ident};
 
 mod helpers;
 
@@ -29,7 +29,7 @@ fn derive_impl<const N: usize>(item: TokenStream, loc: [&str; N], tr: &str) -> T
                 iter.next();
                 // attribute
                 match iter.next().expect("There should be a token") {
-                    TokenTree::Group(g) => {
+                    TokenTree::Group(_) => {
                         // TODO: consume group
                     }
                     _ => panic!("There should be a group after `#`"),
@@ -66,9 +66,10 @@ fn derive_impl<const N: usize>(item: TokenStream, loc: [&str; N], tr: &str) -> T
     let name: proc_macro2::TokenStream = match iter.next().expect("Expected a name") {
         TokenTree::Ident(id) => {
             let stream: TokenStream = quote::quote!(::core::module_path!()).into();
-
-            let stream = stream.expand_expr().unwrap_or(stream);
-
+            let stream = stream
+                .expand_expr()
+                .expect("Expected to expand module_path!()");
+            hash_token_stream(stream, &mut key_gen);
             helpers::hash_span(id.span(), &mut key_gen);
             id.to_string().hash(&mut key_gen);
             [TokenTree::Ident(id)]

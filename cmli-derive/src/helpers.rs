@@ -1,12 +1,11 @@
 use std::{
-    array::{self, IntoIter},
     hash::{Hash, Hasher},
     iter::FusedIterator,
 };
 
 use itertools::Itertools;
 use lccc_siphash::SipHasher;
-use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Span, TokenStream, TokenTree};
+use proc_macro::{Ident, Literal, Punct, Span, TokenStream, TokenTree};
 
 pub fn hash_span<H: Hasher>(span: Span, hasher: &mut H) {
     span.byte_range().hash(hasher);

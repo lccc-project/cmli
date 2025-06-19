@@ -16,8 +16,6 @@ macro_rules! __impl_addr_hash_eq {
     };
 }
 
-use std::num::NonZeroU64;
-
 pub(crate) use __impl_addr_hash_eq;
 
 macro_rules! impl_singleton_hash_eq {

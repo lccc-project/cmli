@@ -34,7 +34,6 @@ dependencies = [
  "indexmap",
  "paste",
  "sym-gen",
- "with_builtin_macros",
 ]
 
 [[package]]
@@ -194,17 +193,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "syn"
-version = "1.0.109"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72b64191b275b66ffe2469e8af2c1cfe3bafa67b529ead792a6d0160888b4237"
-dependencies = [
- "proc-macro2",
- "quote",
- "unicode-ident",
-]
-
-[[package]]
 name = "unicode-ident"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -273,23 +261,3 @@ name = "windows_x86_64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
-
-[[package]]
-name = "with_builtin_macros"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24deb3cd6e530e7617b12b1f0f1ce160a3a71d92feb351c4db5156d1d10e398a"
-dependencies = [
- "with_builtin_macros-proc_macros",
-]
-
-[[package]]
-name = "with_builtin_macros-proc_macros"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2259ae9b1285596f1ee52ce8f627013c65853d4d7f271cb10bfe2d048769804a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]

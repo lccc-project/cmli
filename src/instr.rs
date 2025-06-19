@@ -1,5 +1,3 @@
-use core::num::NonZeroU64;
-
 use indexmap::IndexMap;
 
 use crate::{
@@ -8,13 +6,13 @@ use crate::{
     encode::{Decoder, Encoder},
     helpers::def_id_type,
     intern::Symbol,
-    traits::{IdentityName, IntoId, Unique, into_id},
+    traits::Unique,
 };
 
 pub trait Opcodes: Unique {
     fn encoding_info(&self) -> &OpcodesEncoding;
-    fn instr_spec(&self, id: InstructionId) -> crate::Result<InstructionSpec>;
-    fn prefix_spec(&self, id: PrefixId) -> crate::Result<PrefixSpec>;
+    fn instr_spec(&self, id: InstructionId) -> crate::Result<InstructionSpec<'_>>;
+    fn prefix_spec(&self, id: PrefixId) -> crate::Result<PrefixSpec<'_>>;
     fn legalize<'a>(&'a self, instr: &Instruction) -> Vec<Instruction>;
     fn default_encoding_mode(&self) -> EncodingId;
     fn make_parser(&self) -> Option<Box<dyn Parser + '_>>;

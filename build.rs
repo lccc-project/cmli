@@ -1,4 +1,4 @@
-use std::{fs::ReadDir, io::Write, path::PathBuf};
+use std::{io::Write, path::PathBuf};
 
 const NON_ARCH_FEATURES: &[&str] = &[
     "error-track-caller",
@@ -6,6 +6,7 @@ const NON_ARCH_FEATURES: &[&str] = &[
     "default",
     "default-archs",
     "all-archs",
+    "all-timings",
 ];
 
 fn main() -> std::io::Result<()> {
@@ -14,7 +15,7 @@ fn main() -> std::io::Result<()> {
     for arch in std::env::var("CARGO_CFG_FEATURE")
         .expect("cargo sets CARGO_CFG_FEATURE, right?")
         .split(',')
-        .filter(|f| !NON_ARCH_FEATURES.contains(&f))
+        .filter(|f| !NON_ARCH_FEATURES.contains(&f) && !f.ends_with("-timings"))
     {
         let mut path = PathBuf::from("arch");
         path.push(arch);
@@ -32,6 +33,7 @@ fn main() -> std::io::Result<()> {
 
         match std::fs::read_dir(&path) {
             Ok(dir) => {
+                println!("cargo::rerun-if-changed={}", path.display());
                 for dent in dir {
                     let dent = dent?;
 

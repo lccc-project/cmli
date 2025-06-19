@@ -1,0 +1,18 @@
+
+prefixes X86BasicPrefix : u8{
+    OpOverride ("opsize") = 0x66,
+    AddrOverride ("addrsize") = 0x67,
+    Lock ("locK") = 0xF0,
+    Rep ("rep") = 0xF2,
+    Repnz ("repnz") = 0xF2,
+    Repz ("repz") = 0xF3,
+}
+
+prefixes X86SegPrefix [nop_long_mode: bool = true] : u8 {
+    SegEs ("es") = 0x26,
+    SegCs ("cs") = 0x2E,
+    SegSs ("ss") = 0x36,
+    SegDs  ("ds")= 0x3E,
+    SegFs ("fs") = 0x64 (nop_long_mode: false),
+    SegGs ("gs") = 0x65 (nop_long_mode: false),
+}

@@ -10,9 +10,11 @@ use crate::{
 pub trait Compiler {
     fn allocate_registers(&self, xva: &mut [XvaInstr]) -> Result<()>;
     fn lower_to_mc(&self, xva: &[XvaInstr], mc: &mut Vec<MceInstr>) -> Result<()>;
+    #[allow(unused_variables)]
     fn legalize_mc(&self, mc: &mut [MceInstr]) -> Result<()> {
         Ok(())
     }
+    #[allow(unused_variables)]
     fn optimize_mc(&self, mc: &mut Vec<MceInstr>) -> Result<()> {
         Ok(())
     }

@@ -1,5 +1,4 @@
-use crate::instr_set;
-
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Width {
     Bits(u16),
     Native,
