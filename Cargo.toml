@@ -12,8 +12,14 @@ sym-gen = { git = "https://github.com/lccc-project/sym-gen.git" }
 with_builtin_macros = "0.1.0"
 
 [features]
+# Non-arch feature list
+# Keep Synced with variable in `build.rs` to avoid warnings
 error-track-caller = []
 debug-error-track-caller = []
+default-archs = ["x86"]
+all-archs = ["default-archs"]
+
+# Architectures
 x86 = []
 
 [workspace]
