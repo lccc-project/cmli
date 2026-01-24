@@ -1,0 +1,12 @@
+[package]
+name = "cmli"
+version = "0.1.0"
+edition = "2024"
+build = "build/main.rs"
+
+[dependencies]
+sym-gen = { git = "https://github.com/lccc-project/sym-gen" }
+cmli-proc-macro.path = "cmli-proc-macro"
+
+[workspace]
+members = ["cmli-proc-macro"]
