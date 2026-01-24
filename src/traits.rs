@@ -159,9 +159,11 @@ mod macros {
                     self as u64
                 }
 
+                #[allow(non_upper_case_globals)]
                 fn from_raw_id(x: u64) -> Option<Self> {
                     $(const $var_name: u64 = $name::$var_name as u64;)*
 
+                    #[allow(non_uppercase_globals)]
                     match x {
                         $($var_name => Some(Self::$var_name),)*
                         _ => None

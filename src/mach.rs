@@ -1,4 +1,8 @@
-use crate::traits::{AsId, IdType, Name};
+use crate::{
+    compiler::CompilerSpec,
+    instr::RegisterKind,
+    traits::{AsId, IdType, Name},
+};
 use std::{hash::Hasher, num::NonZeroU64};
 
 use crate::traits::AsRawId;
@@ -12,15 +16,26 @@ impl const AsId<MachineMode> for OneMachine {}
 
 const ONE_MACHINE: &[MachineMode] = as_id_array!([OneMachine::Singleton] => MachineMode);
 
+pub trait RegisterSpec: AsId<Register> + Name {
+    /// The Kind of the register
+    fn kind(&self) -> RegisterKind;
+    /// The size (in bytes) of the register
+    fn size(&self, mode: MachineMode) -> u32;
+}
+
 pub trait MachineSpec: Sized {
     type Opcode: AsId<Opcode> + Name;
     const OPCODES: &[Opcode];
-    type Register: AsId<Register> + Name;
+    type Register: RegisterSpec;
     const REGISTERS: &[Register];
     type MachineMode: AsId<MachineMode> + Name;
     const MACH_MODES: &[MachineMode];
 
+    type Compiler: CompilerSpec<Machine = Self>;
+
     fn name(&self) -> &'static str;
+
+    fn as_compiler(&self) -> &Self::Compiler;
 }
 
 macro_rules! machine_helper {
@@ -37,7 +52,7 @@ macro_rules! machine_helper {
                 fn name_of(&self, val: $ty_name) -> &'static str {
                     match val.downcast::<M::$ty_name>() {
                         Some(val) => val.name(),
-                        None => ::core::concat!("**Unknown ", ::core::stringify!($ty_anem), "**"),
+                        None => ::core::concat!("**Unknown ", ::core::stringify!($ty_name), "**"),
                     }
                 }
             }
@@ -67,6 +82,20 @@ impl<M: MachineSpec> Machine for M {
             MACH_MODES
         }
     );
+
+    fn register_kind(&self, reg: Register) -> RegisterKind {
+        match reg.downcast::<<Self as MachineSpec>::Register>() {
+            Some(reg) => reg.kind(),
+            None => panic!("Not a valid register"),
+        }
+    }
+
+    fn register_size(&self, reg: Register, mode: MachineMode) -> u32 {
+        match reg.downcast::<<Self as MachineSpec>::Register>() {
+            Some(reg) => reg.size(mode),
+            None => panic!("Not a valid register"),
+        }
+    }
 }
 
 pub trait Machine {
@@ -74,6 +103,9 @@ pub trait Machine {
     fn opcodes(&self) -> &(dyn DynList<Opcode> + '_);
     fn registers(&self) -> &(dyn DynList<Register> + '_);
     fn modes(&self) -> &(dyn DynList<MachineMode> + '_);
+
+    fn register_kind(&self, reg: Register) -> RegisterKind;
+    fn register_size(&self, reg: Register, mode: MachineMode) -> u32;
 }
 
 macro_rules! impl_machine_helper {
