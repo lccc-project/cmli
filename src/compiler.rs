@@ -2,7 +2,7 @@ use std::num::NonZeroU64;
 
 use crate::{
     mach::{Machine, MachineMode, MachineSpec, RegisterSpec},
-    target::{TargetInfo, TargetProperties},
+    target::{PropertyValue, TargetInfo, TargetProperties},
     traits::{AsId, IdType, Name},
 };
 
@@ -18,6 +18,17 @@ pub struct CompilerContext {
     pub mode: MachineMode,
     pub properties: TargetInfo,
     pub property_overrides: TargetProperties,
+}
+
+impl CompilerContext {
+    pub fn property<S: AsRef<str> + ?Sized>(&self, key: &S) -> Option<&PropertyValue> {
+        let st = key.as_ref();
+        if let Some(prop) = self.property_overrides.global_properties.get(st) {
+            Some(prop)
+        } else {
+            self.properties.properties.global_properties.get(st)
+        }
+    }
 }
 
 pub trait Compiler {

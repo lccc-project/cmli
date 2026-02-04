@@ -25,6 +25,7 @@ name = "cmli"
 version = "0.1.0"
 dependencies = [
  "cmli-proc-macro",
+ "paste",
  "sym-gen",
 ]
 
@@ -62,13 +63,13 @@ dependencies = [
 [[package]]
 name = "lccc-siphash"
 version = "0.1.0"
-source = "git+https://github.com/lccc-project/lccc-siphash.git#631f022a5eb30f39e19a199ec7e44d9906a622b8"
+source = "git+https://github.com/lccc-project/lccc-siphash.git#68ef834bdbbff1d5fc3fc30d37e46b7ab789d19f"
 
 [[package]]
 name = "libc"
-version = "0.2.177"
+version = "0.2.180"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2874a2af47a2325c2001a6e6fad9b16a53b802102b528163885171cf92b15976"
+checksum = "bcc35a38544a891a5f7c865aca548a982ccb3b8650a5b06d0fd33a10283c56fc"
 
 [[package]]
 name = "lock_api"
@@ -103,10 +104,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "proc-macro2"
-version = "1.0.103"
+name = "paste"
+version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ee95bc4ef87b8d5ba32e8b7714ccc834865276eab0aed5c9958d00ec45f49e8"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
+name = "proc-macro2"
+version = "1.0.106"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
 ]
@@ -144,9 +151,10 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 [[package]]
 name = "sym-gen"
 version = "0.1.0"
-source = "git+https://github.com/lccc-project/sym-gen#2ae0be4415aee46f3c6037c621531360348f3e63"
+source = "git+https://github.com/lccc-project/sym-gen#3d3df63cedab752fc638f6aa78df91190712dbb9"
 dependencies = [
  "hashbrown",
+ "lock_api",
  "parking_lot",
 ]
 

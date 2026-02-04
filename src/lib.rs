@@ -1,4 +1,4 @@
-#![feature(macro_derive, const_trait_impl)]
+#![feature(macro_derive, macro_metavar_expr, const_trait_impl, const_cmp)]
 
 #[macro_use]
 #[doc(hidden)]
@@ -14,3 +14,5 @@ pub mod target;
 pub mod traits;
 
 pub mod xva;
+
+pub mod archs;

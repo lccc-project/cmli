@@ -113,7 +113,7 @@ pub const fn hash_string_const(base: u64, v: &str) -> u64 {
     state[0] ^ state[1] ^ state[2] ^ state[3]
 }
 
-pub const trait AsId<T: IdType>: [const] AsRawId {}
+pub const trait AsId<T: [const] IdType>: [const] AsRawId {}
 pub const unsafe trait IdType: Copy + core::hash::Hash + Eq {
     #[doc(hidden)]
     fn into_raw_parts(self) -> (NonZeroU64, u64);
@@ -146,6 +146,40 @@ pub const fn raw_id_type(x: u64) -> NonZeroU64 {
 mod macros {
     #[macro_export]
     macro_rules! AsRawId {
+
+        derive() (#[repr($int:ident)] $(#[$meta:meta])* $vis:vis enum $name:ident {
+            $($var_name:ident ($field:ty) $(= $discrim:expr)?),*
+            $(,)?
+        }) => {
+            unsafe impl const $crate::traits::AsRawId for $name {
+                const TYPE: ::core::num::NonZeroU64 = $crate::traits::raw_id_type($crate::traits::hash_string_const($crate::macros::rand_u64!(enum $name {
+                    $($var_name $(= $discrim)?),*
+                }), ::core::concat!(::core::module_path!(), "::", ::core::stringify!($name), $("\0", ::core::stringify!($var_name)),*)));
+
+                fn into_raw_id(self) -> u64 {
+                    let x = unsafe {(&self as *const Self as *const $int).read()} as u32 as u64;
+
+                    match self {
+                        $(Self:: $var_name(__val) => {
+                            (__val as u32 as u64) | x << 32
+                        })*
+                    }
+                }
+
+                #[allow(non_upper_case_globals)]
+                fn from_raw_id(x: u64) -> Option<Self> {
+                    $(const $var_name: u64 = (($name::$var_name(0)).into_raw_id() >> 32);)*
+
+                    #[allow(non_uppercase_globals)]
+                    match x >> 32 {
+                        $($var_name => Some(Self::$var_name ( (x & 0xFFFFFFFF) as $field)),)*
+                        _ => None
+                    }
+                }
+            }
+        };
+
+
         derive() ($(#[$meta:meta])* $vis:vis enum $name:ident {
             $($var_name:ident $(= $discrim:expr)?),*
             $(,)?

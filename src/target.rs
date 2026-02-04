@@ -5,6 +5,7 @@ use crate::intern::Symbol;
 #[derive(Clone, Debug)]
 pub struct TargetInfo {
     pub properties: TargetProperties,
+    pub ptr_width: u16,
 }
 
 #[derive(Clone, Debug)]

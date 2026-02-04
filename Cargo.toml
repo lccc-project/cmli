@@ -5,8 +5,18 @@ edition = "2024"
 build = "build/main.rs"
 
 [dependencies]
-sym-gen = { git = "https://github.com/lccc-project/sym-gen" }
+sym-gen = { git = "https://github.com/lccc-project/sym-gen", features = [
+    "std",
+] }
 cmli-proc-macro.path = "cmli-proc-macro"
+paste = "1.0.15"
 
 [workspace]
 members = ["cmli-proc-macro"]
+
+[features]
+x86 = []
+
+default = ["default-archs"]
+default-archs = ["x86"]
+all-archs = ["default-archs"]

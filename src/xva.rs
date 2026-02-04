@@ -1,4 +1,9 @@
-use crate::{instr::RegisterKind, intern::Symbol, mach::Register};
+use crate::{
+    instr::RegisterKind,
+    intern::Symbol,
+    mach::Register,
+    traits::{AsId, IdType as _},
+};
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum XvaTrap {
@@ -15,6 +20,12 @@ pub enum XvaStatement {
     Tailcall {
         dest: XvaOperand,
         params: Vec<XvaRegister>,
+    },
+    Call {
+        dest: XvaOperand,
+        params: Vec<XvaRegister>,
+        ret_val: Vec<XvaRegister>,
+        call_clobber_regs: Vec<XvaRegister>,
     },
     Return,
     Trap(XvaTrap),
@@ -136,6 +147,12 @@ pub enum XvaRegister {
     Virtual(XvaDest),
 }
 
+impl XvaRegister {
+    pub const fn physical<R: [const] AsId<Register>>(reg: R) -> Self {
+        XvaRegister::Physical(Register::new(reg))
+    }
+}
+
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct XvaDest {
     pub id: u32,
@@ -145,6 +162,7 @@ pub struct XvaDest {
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct XvaFunction {
     pub params: Vec<XvaRegister>,
+    pub preserve_regs: Vec<XvaRegister>,
     pub return_reg: XvaRegister,
     pub statement: Vec<XvaStatement>,
 }

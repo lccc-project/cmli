@@ -18,6 +18,7 @@ pub enum RegisterKind {
     System,
     ConditionCode,
     Special,
+    AddressSegment,
 }
 
 pub struct Instruction {
