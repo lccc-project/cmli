@@ -1,4 +1,10 @@
-#![feature(macro_derive, macro_metavar_expr, const_trait_impl, const_cmp)]
+#![feature(
+    macro_derive,
+    macro_metavar_expr,
+    const_trait_impl,
+    const_cmp,
+    adt_const_params
+)]
 
 #[macro_use]
 #[doc(hidden)]

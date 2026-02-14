@@ -10,6 +10,7 @@ sym-gen = { git = "https://github.com/lccc-project/sym-gen", features = [
 ] }
 cmli-proc-macro.path = "cmli-proc-macro"
 paste = "1.0.15"
+bitflags = "2.10.0"
 
 [workspace]
 members = ["cmli-proc-macro"]

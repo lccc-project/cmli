@@ -2,6 +2,7 @@ use crate::{
     compiler::CompilerSpec,
     instr::RegisterKind,
     traits::{AsId, IdType, Name},
+    xva::XvaCategory,
 };
 use std::{hash::Hasher, num::NonZeroU64};
 
@@ -22,6 +23,12 @@ pub trait RegisterSpec: AsId<Register> + Name {
     fn kind(&self) -> RegisterKind;
     /// The size (in bytes) of the register
     fn size(&self, mode: Self::MachineMode) -> u32;
+
+    fn category(&self, mode: Self::MachineMode) -> XvaCategory;
+
+    fn align(&self, mode: Self::MachineMode) -> u32 {
+        self.size(mode).next_power_of_two()
+    }
 
     /// Checks whether or not two different registers overlap (IE. refer to different slices of the same register)
     fn overlaps(&self, other: &Self) -> bool;
@@ -121,6 +128,17 @@ impl<M: MachineSpec> Machine for M {
                 }
             }
 
+            fn register_align(&self, reg: Register, mode: MachineMode) -> u32 {
+                match (
+                    reg.downcast::<This::Register>(),
+                    mode.downcast::<This::MachineMode>(),
+                ) {
+                    (Some(reg), Some(mode)) => reg.align(mode),
+                    (None, _) => panic!("Unknown Register"),
+                    (_, None) => panic!("Unknown MachineMode"),
+                }
+            }
+
             fn register_overlaps(&self, reg1: Register, reg2: Register) -> bool {
                 match (
                     reg1.downcast::<This::Register>(),
@@ -128,6 +146,17 @@ impl<M: MachineSpec> Machine for M {
                 ) {
                     (Some(reg1), Some(reg2)) => reg1.overlaps(&reg2),
                     _ => panic!("Unknown Register"),
+                }
+            }
+
+            fn register_category(&self, reg: Register, mode: MachineMode) -> XvaCategory {
+                match (
+                    reg.downcast::<This::Register>(),
+                    mode.downcast::<This::MachineMode>(),
+                ) {
+                    (Some(reg), Some(mode)) => reg.category(mode),
+                    (None, _) => panic!("Unknown Register"),
+                    (_, None) => panic!("Unknown MachineMode"),
                 }
             }
         }
@@ -184,6 +213,8 @@ pub trait DynList<T> {
 pub trait Registers: DynList<Register> {
     fn register_kind(&self, reg: Register) -> RegisterKind;
     fn register_size(&self, reg: Register, mode: MachineMode) -> u32;
+    fn register_align(&self, reg: Register, mode: MachineMode) -> u32;
+    fn register_category(&self, reg: Register, mode: MachineMode) -> XvaCategory;
 
     fn register_overlaps(&self, reg1: Register, reg2: Register) -> bool;
 }

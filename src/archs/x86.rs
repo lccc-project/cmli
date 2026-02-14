@@ -1,5 +1,6 @@
 use crate::{
-    mach::{MachineMode, Register, RegisterSpec},
+    compiler::CompilerSpec,
+    mach::{MachineMode, MachineSpec, Opcode, Register, RegisterSpec},
     traits::{AsId, AsRawId, IdType, Name},
 };
 
@@ -14,6 +15,13 @@ pub enum X86Mode {
 }
 
 impl X86Mode {
+    pub const ALL_MODES: [X86Mode; 4] = [
+        X86Mode::Real,
+        X86Mode::Protected16,
+        X86Mode::Protected,
+        X86Mode::Long,
+    ];
+
     pub fn largest_gpr(&self) -> u32 {
         match self {
             X86Mode::Real => 16,
@@ -24,7 +32,7 @@ impl X86Mode {
     }
 }
 
-impl AsId<MachineMode> for X86Mode {}
+impl const AsId<MachineMode> for X86Mode {}
 
 macro_rules! def_helper_arms {
     ($var:ident, $($capture:literal)* => $prefix:ident _) => {
@@ -58,8 +66,8 @@ macro_rules! def_from_name_arms {
 
 macro_rules! define_x86_registers {
     {
-        $vis:vis enum $name:ident {
-            $($class:ident $(#[norex] $(@ $_norex_tt:tt)?)? [ $($names:ident),* $(, #$prefix:ident _ $($suffix:ident)? $begin:literal..$end:literal)?] $(($size:literal))? $(overlaps [$($overlap_var:ident),*])? = $kind:expr),* $(,)?
+        $vis:vis enum $name:ident ($class_enum:ident) {
+            $($class:ident $(#[norex] $(@ $_norex_tt:tt)?)? [ $($names:ident),* $(, #$prefix:ident _ $($suffix:ident)? $begin:literal..$end:literal)?]  $(($size:literal))? @ $category:ident $(($($cat_tt:tt)*))? $(overlaps [$($overlap_var:ident),*])? = $kind:expr),* $(,)?
         }
     } => {
         #[derive(Copy, Clone, Hash, PartialEq, Eq, AsRawId)]
@@ -67,6 +75,50 @@ macro_rules! define_x86_registers {
         #[non_exhaustive]
         $vis enum $name {
             $($class (u8)),*
+        }
+
+
+
+        const _: () = {
+            #[repr(C)]
+            struct __Concat<$($class),*>($($class),*);
+
+            const fn __count_by_class(__reg: $name) -> usize {
+                match __reg {
+                    $($name :: $class (_) => ($($(@ $_norex_tt)? 8,)? $(${ignore($prefix)} 32,)? ${count($names)},).0),*
+                }
+            }
+
+            const __TOTAL_COUNT: usize = $(__count_by_class($name :: $class (0)) +)* 0;
+
+            const fn __make_array<const N: usize, const __CLASS: $class_enum>() -> [$name; N] {
+                let mut ret: [$name; N] = unsafe { core::mem::zeroed() };
+
+                let mut i = 0;
+
+                while i < N {
+                    ret[i] = match __CLASS { $($class_enum::$class => $name::$class (i as u8)),* };
+                    i += 1;
+                }
+
+                ret
+            }
+
+            const fn __concat<const N: usize, $($class),*>(__helper: __Concat<$($class),*>) -> [$name; N] {
+                unsafe { $crate::mem::transmute(__helper) }
+            }
+
+            impl $name {
+                $vis const ALL_REGISTERS: [$name; __TOTAL_COUNT] = __concat(__Concat(
+                    $(__make_array::<{ __count_by_class($name :: $class (0)) }, { $class_enum :: $class}>()),*)
+                );
+            }
+        };
+
+        #[derive(Copy, Clone, Hash, PartialEq, Eq, core::marker::ConstParamTy)]
+        #[non_exhaustive]
+        $vis enum $class_enum {
+            $($class),*
         }
 
 
@@ -94,6 +146,12 @@ macro_rules! define_x86_registers {
             #[inline]
             pub fn from_name(name: &str) -> Self {
                 Self::from_name_impl(name)
+            }
+
+            pub const fn class(&self) -> $class_enum {
+                match self {
+                    $(Self:: $class(_) => $class_enum :: $class),*
+                }
             }
         }
 
@@ -127,7 +185,7 @@ macro_rules! define_x86_registers {
         }
 
         impl $name {
-            fn kind(&self) -> RegisterKind {
+            const fn kind(&self) -> RegisterKind {
                 match self {
                     $(Self::$class(_) => $kind),*
                 }
@@ -155,28 +213,35 @@ macro_rules! define_x86_registers {
                     $(Self::$class(__n) => *__n $(& 7 $(@ $_norex_tt)?)?),*
                 }
             }
+
+            pub const fn category(&self) -> crate::xva::XvaCategory {
+                match self {
+                    $(Self::$class(_) => crate::xva::XvaCategory:: $category $(($($cat_tt)*))?,)*
+                }
+            }
         }
     }
 }
 
 define_x86_registers! {
-    pub enum X86Register {
-        Byte[al, cl, dl, bl, ah, ch, dh, bh] (1) = RegisterKind::GeneralPurpose,
-        ByteRex[al, cl, dl, bl, spl, bpl, sil, dil, #r _ b 8..32] (1) overlaps [Word, Double, Quad] = RegisterKind::GeneralPurpose,
-        Word[ax, cx, dx, bx, sp, bp, si, di, #r _ w 8..32] (2) overlaps [ByteRex, Double, Quad] = RegisterKind::GeneralPurpose,
-        Double[eax, ecx, edx, ebx, esp, ebp, esi, edi, #r _ d 8..32] (4) overlaps [ByteRex, Word, Quad] = RegisterKind::GeneralPurpose,
-        Quad [rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, #r _ 8..32] (8) overlaps [ByteRex, Word, Double] = RegisterKind::GeneralPurpose,
-        Segment #[norex] [es, cs, ss, ds, fs, gs] (2) = RegisterKind::AddressSegment,
-        St [, #st _ 0..8] (10) = RegisterKind::ScalarFp,
-        Mmx #[norex] [, #mm _ 0..8] (8) = RegisterKind::VectorInt,
-        Xmm [, #xmm _ 0..32] (16) overlaps [Ymm, Zmm] = RegisterKind::VectorAny,
-        Ymm [, #ymm _ 0..32] (32) overlaps [Xmm, Zmm] = RegisterKind::VectorAny,
-        Zmm [, #zmm _ 0..32] (64) overlaps [Xmm, Ymm] = RegisterKind::VectorAny,
-        Tmm [, #tmm _ 0..32] (1024) = RegisterKind::VectorAny,
-        Kreg [, #k _ 0..32] (8) = RegisterKind::VectorBit,
-        Control [, #cr _ 0..32] = RegisterKind::System,
-        Debug [, #dr _ 0..32] = RegisterKind::System,
-        ExtControl [, #xcr _ 0..32] = RegisterKind::System,
+    pub enum X86Register (X86RegisterClass) {
+        Byte [al, cl, dl, bl] (1) @ Int = RegisterKind::GeneralPurpose,
+        ByteLegacy #[norex][al, cl, dl, bl, ah, ch, dh, bh] (1) @ Int = RegisterKind::GeneralPurpose,
+        ByteRex[al, cl, dl, bl, spl, bpl, sil, dil, #r _ b 8..32] (1) @ Int overlaps [Word, Double, Quad] = RegisterKind::GeneralPurpose,
+        Word[ax, cx, dx, bx, sp, bp, si, di, #r _ w 8..32] (2) @ Int overlaps [ByteRex, Double, Quad] = RegisterKind::GeneralPurpose,
+        Double[eax, ecx, edx, ebx, esp, ebp, esi, edi, #r _ d 8..32] (4) @ Int overlaps [ByteRex, Word, Quad] = RegisterKind::GeneralPurpose,
+        Quad [rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, #r _ 8..32] (8) @ Int overlaps [ByteRex, Word, Double] = RegisterKind::GeneralPurpose,
+        Segment #[norex] [es, cs, ss, ds, fs, gs] (2) @ Custom(RegisterKind::AddressSegment) = RegisterKind::AddressSegment,
+        St [, #st _ 0..8] (10) @ Float = RegisterKind::ScalarFp,
+        Mmx #[norex] [, #mm _ 0..8] (8) @ VectorInt = RegisterKind::VectorInt,
+        Xmm [, #xmm _ 0..32] (16) @ VectorAny overlaps [Ymm, Zmm] = RegisterKind::VectorAny,
+        Ymm [, #ymm _ 0..32] (32) @ VectorAny overlaps [Xmm, Zmm] = RegisterKind::VectorAny,
+        Zmm [, #zmm _ 0..32] (64) @ VectorAny overlaps [Xmm, Ymm] = RegisterKind::VectorAny,
+        Tmm [, #tmm _ 0..32] (1024) @ VectorAny = RegisterKind::VectorAny,
+        Kreg [, #k _ 0..32] (8) @ VectorInt = RegisterKind::VectorBit,
+        Control [, #cr _ 0..32] @ Custom(RegisterKind::System) = RegisterKind::System,
+        Debug [, #dr _ 0..32] @ Custom(RegisterKind::System) = RegisterKind::System,
+        ExtControl [, #xcr _ 0..32] @ Custom(RegisterKind::System) = RegisterKind::System,
     }
 }
 
@@ -218,27 +283,33 @@ pub enum XmmSize {
 impl X86Register {
     pub const fn promote_gpr(&self, new_size: GprSize) -> X86Register {
         match (self, new_size) {
-            (Self::Byte(n), GprSize::Byte) => Self::Byte(*n),
-            (Self::Byte(n), GprSize::Word) if *n < 4 => Self::Word(*n),
-            (Self::Byte(n), GprSize::Double) if *n < 4 => Self::Double(*n),
-            (Self::Byte(n), GprSize::Quad) if *n < 4 => Self::Quad(*n),
-            (Self::ByteRex(n) | Self::Word(n) | Self::Double(n) | Self::Quad(n), GprSize::Byte) => {
+            (Self::ByteLegacy(n), GprSize::Byte) if *n < 4 => Self::Byte(*n),
+            (Self::ByteLegacy(n), GprSize::Word) if *n < 4 => Self::Word(*n),
+            (Self::ByteLegacy(n), GprSize::Double) if *n < 4 => Self::Double(*n),
+            (Self::ByteLegacy(n), GprSize::Quad) if *n < 4 => Self::Quad(*n),
+            (Self::ByteLegacy(n), GprSize::Byte) => Self::ByteLegacy(*n),
+            (
+                Self::ByteRex(n) | Self::Byte(n) | Self::Word(n) | Self::Double(n) | Self::Quad(n),
+                GprSize::Byte,
+            ) => {
                 if *n < 4 {
                     Self::Byte(*n)
                 } else {
                     Self::ByteRex(*n)
                 }
             }
-            (Self::ByteRex(n) | Self::Word(n) | Self::Double(n) | Self::Quad(n), GprSize::Word) => {
-                Self::Word(*n)
-            }
             (
-                Self::ByteRex(n) | Self::Word(n) | Self::Double(n) | Self::Quad(n),
+                Self::ByteRex(n) | Self::Byte(n) | Self::Word(n) | Self::Double(n) | Self::Quad(n),
+                GprSize::Word,
+            ) => Self::Word(*n),
+            (
+                Self::ByteRex(n) | Self::Byte(n) | Self::Word(n) | Self::Double(n) | Self::Quad(n),
                 GprSize::Double,
             ) => Self::Double(*n),
-            (Self::ByteRex(n) | Self::Word(n) | Self::Double(n) | Self::Quad(n), GprSize::Quad) => {
-                Self::Quad(*n)
-            }
+            (
+                Self::ByteRex(n) | Self::Byte(n) | Self::Word(n) | Self::Double(n) | Self::Quad(n),
+                GprSize::Quad,
+            ) => Self::Quad(*n),
             _ => panic!("Not a GPR"),
         }
     }
@@ -296,7 +367,7 @@ impl X86Register {
     }
 }
 
-impl AsId<Register> for X86Register {}
+impl const AsId<Register> for X86Register {}
 
 impl RegisterSpec for X86Register {
     type MachineMode = X86Mode;
@@ -306,6 +377,13 @@ impl RegisterSpec for X86Register {
 
     fn size(&self, mode: X86Mode) -> u32 {
         self.size(mode)
+    }
+
+    fn align(&self, mode: Self::MachineMode) -> u32 {
+        match self {
+            Self::St(_) => 2,
+            _ => self.size(mode),
+        }
     }
 
     fn overlaps(&self, other: &Self) -> bool {
@@ -324,6 +402,10 @@ impl RegisterSpec for X86Register {
             _ => self.overlaps_impl(other),
         }
     }
+
+    fn category(&self, _: Self::MachineMode) -> crate::xva::XvaCategory {
+        self.category()
+    }
 }
 
 #[macro_export]
@@ -331,4 +413,84 @@ macro_rules! x86_registers {
     [$($reg:ident),* $(,)?] => {
         const { [$($crate::archs::x86::X86Register::from_name_impl(::core::stringify!($reg))),*]}
     }
+}
+
+pub enum X86OperandKind {
+    Register(X86RegisterClass),
+    Immediate,
+    Memory(X86RegisterClass),
+}
+
+macro_rules! x86_instructions {
+    {
+        $vis:vis enum $name:ident {
+            $(#[prefix] $prefix_name:ident ($prefix_mnemonic:literal) = $prefix_opcode:literal;)*
+            $($instr_name:ident ($mnemonic:literal) {
+                $([$($operand:pat),+ $(,)?] $($mode:pat)? => $opcode:literal),+ $(,)?
+            })*
+        }
+    } => {
+
+        #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, AsRawId)]
+        $vis enum $name {
+            $($prefix_name,)*
+            $($instr_name),*
+        }
+
+        impl $name {
+            pub const ALL_OPCODES: [Self; ${count($instr_name)} + ${count($prefix_name)}] = [$(Self::$prefix_name,)* $(Self::$instr_name),*];
+        }
+
+        impl const $crate::traits::AsId<$crate::mach::Opcode> for $name {}
+
+        impl $crate::traits::Name for $name {
+            fn name(&self) -> &'static str {
+                match self {
+                    $(Self::$prefix_name => $prefix_mnemonic,)*
+                    $(Self::$instr_name => $mnemonic),*
+                }
+            }
+        }
+
+    };
+}
+
+x86_instructions! {
+    pub enum X86Opcode {
+        #[prefix] Lock ("lock") = 0xF0;
+        #[prefix] AddrOverride ("addro") = 0x67;
+        #[prefix] DataOverride ("datao") = 0x66;
+        #[prefix] Repnz ("repnz") = 0xF2;
+        #[prefix] Repz ("repz") = 0xF3;
+        #[prefix] Rep ("rep") = 0xF3;
+        #[prefix] Wait ("fwait") = 0x9B;
+        Add ("add") {
+            [Memory(X86RegisterClass::Byte) | Register(X86RegisterClass::Byte), Register(X86RegisterClass::Byte)] => 0x00,
+        }
+    }
+}
+
+pub struct X86;
+
+impl MachineSpec for X86 {
+    type MachineMode = X86Mode;
+    type Compiler = Self;
+    type Opcode = X86Opcode;
+    type Register = X86Register;
+
+    const MACH_MODES: &[MachineMode] = as_id_array!(X86Mode::ALL_MODES => MachineMode);
+    const REGISTERS: &[Register] = as_id_array!(X86Register::ALL_REGISTERS => Register);
+    const OPCODES: &[Opcode] = as_id_array!(X86Opcode::ALL_OPCODES => Opcode);
+
+    fn as_compiler(&self) -> &Self::Compiler {
+        self
+    }
+
+    fn name(&self) -> &'static str {
+        "x86"
+    }
+}
+
+impl CompilerSpec for X86 {
+    type Machine = Self;
 }

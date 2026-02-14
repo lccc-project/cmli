@@ -18,6 +18,7 @@ pub struct CompilerContext {
     pub mode: MachineMode,
     pub properties: TargetInfo,
     pub property_overrides: TargetProperties,
+    pub target_features: Vec<String>,
 }
 
 impl CompilerContext {

@@ -21,9 +21,10 @@ pub enum RegisterKind {
     AddressSegment,
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Instruction {
     mode_override: Option<MachineMode>,
-    prefix: Option<Opcode>,
+    prefixes: Vec<Opcode>,
     backing: Opcode,
     operands: Vec<Operand>,
 }
@@ -34,6 +35,14 @@ pub enum Operand {
     Immediate(u128),
     AbsAddress(Address),
     RelAddress(Address),
+    Memory(MemoryOperand),
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub struct MemoryOperand {
+    pub value_size: Option<usize>,
+    pub addr: Address,
+    pub rel: bool,
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
