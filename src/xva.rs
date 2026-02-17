@@ -1,5 +1,6 @@
 use crate::{
-    instr::{Instruction, RegisterKind},
+    fmt::pretty_print_list,
+    instr::{Address, Instruction, RegisterKind},
     intern::Symbol,
     mach::{Machine, MachineMode, Register},
     traits::{AsId, IdType as _},
@@ -93,13 +94,23 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaStatement> {
                 PrettyPrinter(reg, self.1)
             )),
             XvaStatement::Jump(symbol) => f.write_fmt(format_args!("jump {symbol}")),
-            XvaStatement::Tailcall { dest, params } => todo!(),
+            XvaStatement::Tailcall { dest, params } => f.write_fmt(format_args!(
+                "tailcall {} ({})",
+                PrettyPrinter(dest, self.1),
+                pretty_print_list(params, ", ", self.1),
+            )),
             XvaStatement::Call {
                 dest,
                 params,
                 ret_val,
                 call_clobber_regs,
-            } => todo!(),
+            } => f.write_fmt(format_args!(
+                "call {} ({}) -> {} clobbers [{}]",
+                PrettyPrinter(dest, self.1),
+                pretty_print_list(params, ", ", self.1),
+                pretty_print_list(ret_val, ", ", self.1),
+                pretty_print_list(call_clobber_regs, ", ", self.1)
+            )),
             XvaStatement::Return => f.write_str("return"),
             XvaStatement::Trap(trap) => f.write_fmt(format_args!("trap {trap}")),
             XvaStatement::RawInstr(instruction) => todo!(),
@@ -498,10 +509,11 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaFunction> {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Default)]
 pub struct XvaFile {
     pub weak_decls: Vec<Symbol>,
     pub functions: Vec<XvaFunctionDef>,
+    pub objects: Vec<XvaObjectDef>,
 }
 
 impl XvaFile {
@@ -518,6 +530,10 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaFile> {
 
         for func in &self.0.functions {
             PrettyPrinter(func, self.1).fmt(f)?;
+        }
+
+        for def in &self.0.objects {
+            PrettyPrinter(def, self.1).fmt(f)?;
         }
         Ok(())
     }
@@ -558,12 +574,14 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaFunctionDef> {
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum XvaSection {
-    Global,
+    Text,
+    RoData,
+    Data,
     Explicit(Symbol),
-    Private,
+    PrivateText,
+    Common,
+    TlsData,
 }
-
-pub struct PrettyPrinter<'a, T>(&'a T, &'a dyn Machine);
 
 impl core::fmt::Display for Linkage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -578,9 +596,57 @@ impl core::fmt::Display for Linkage {
 impl core::fmt::Display for XvaSection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            XvaSection::Global => f.write_str("global"),
+            XvaSection::Text => f.write_str("text"),
+            XvaSection::RoData => f.write_str("rodata"),
+            XvaSection::Data => f.write_str("data"),
             XvaSection::Explicit(name) => f.write_str(name.as_str()),
-            XvaSection::Private => f.write_str("private"),
+            XvaSection::PrivateText => f.write_str("private"),
+            XvaSection::Common => f.write_str("common"),
+            XvaSection::TlsData => f.write_str("tls data"),
         }
     }
 }
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct XvaObjectDef {
+    pub ty: XvaType,
+    pub body: Vec<u8>,
+    pub relocs: Vec<XvaRelocation>,
+    pub linkage: Linkage,
+    pub label: Symbol,
+    pub section: XvaSection,
+}
+
+impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaObjectDef> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.0.linkage.fmt(f)?;
+        f.write_str(" def ")?;
+        f.write_str(&self.0.label)?;
+        f.write_str(" as ")?;
+        self.0.ty.fmt(f)?;
+        f.write_str(" (in ")?;
+        self.0.section.fmt(f)?;
+        f.write_str(")")?;
+
+        for (i, b) in self.0.body.iter().enumerate() {
+            if (i & 15) == 0 {
+                f.write_str("\n\t")?;
+            } else {
+                f.write_str(" ")?;
+            }
+            f.write_fmt(format_args!("{b:02x}"))?;
+        }
+
+        f.write_str("\nend def ")?;
+        f.write_str(&self.0.label)?;
+        f.write_str("\n")
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct XvaRelocation {
+    pub offset: usize,
+    pub addr: Address,
+}
+
+use crate::fmt::PrettyPrinter;

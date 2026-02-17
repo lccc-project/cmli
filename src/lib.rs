@@ -22,3 +22,5 @@ pub mod traits;
 pub mod xva;
 
 pub mod archs;
+
+pub mod fmt;

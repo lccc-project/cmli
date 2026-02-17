@@ -42,7 +42,6 @@ pub enum Operand {
 pub struct MemoryOperand {
     pub value_size: Option<usize>,
     pub addr: Address,
-    pub rel: bool,
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
@@ -51,6 +50,23 @@ pub struct Address {
     pub base: Option<Register>,
     pub index: Option<Register>,
     pub scale: u32,
-    pub sym: Option<Symbol>,
+    pub sym: Option<RelocSym>,
     pub disp: Option<NonZeroI64>,
+    pub rel: bool,
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub struct RelocSym {
+    pub sym: Symbol,
+    pub kind: AddressKind,
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum AddressKind {
+    Default,
+    Got,
+    Plt,
+    Tpoff,
+    DTpoff,
+    TlsDesc,
 }
