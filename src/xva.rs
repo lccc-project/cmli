@@ -33,9 +33,14 @@ bitflags::bitflags! {
         const ELIDE_REGISTERS = 0x0000_0004;
         /// Prevents eliding stores
         const ELIDE_STORE = 0x0000_0008;
-        /// Forbids all Optimizations until the barrier is ended
-        const DO_NOT_OPTIMIZE = 0x0000_0010;
+        /// Forbids other miscelanius transformations
+        const MISC_OPTIMIZATION = 0x0000_0010;
     }
+}
+
+impl BarrierKind {
+    /// Forbids all optimizations until the barrier ends
+    pub const DO_NOT_OPTIMIZE: BarrierKind = BarrierKind::all();
 }
 
 impl core::fmt::Display for BarrierKind {
@@ -60,9 +65,65 @@ impl core::fmt::Display for BarrierKind {
     }
 }
 
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum NoopKind {
+    Normal,
+    PauseHint,
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum UseKind {
+    Read,
+    Write,
+    ReadWrite,
+}
+
+impl core::fmt::Display for UseKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UseKind::Read => f.write_str("read"),
+            UseKind::Write => f.write_str("write"),
+            UseKind::ReadWrite => f.write_str("readwrite"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct XvaBasicBlock {
+    pub label: Symbol,
+    pub live_at_start: Vec<XvaRegister>,
+    pub body: XvaBlockBody,
+}
+
+impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaBasicBlock> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)?;
+        f.write_str(" [")?;
+        pretty_print_list(&self.live_at_start, ", ", self.1, self.2).fmt(f)?;
+        f.write_str("]:\n")?;
+
+        match &self.body {
+            XvaBlockBody::Statement(stmts) => {
+                for stmt in stmts {
+                    f.write_str("\t")?;
+                    PrettyPrinter(stmt, self.1, self.2).fmt(f)?;
+                    f.write_str("\n")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum XvaBlockBody {
+    Statement(Vec<XvaStatement>),
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum XvaStatement {
-    Label(Symbol),
     Expr(XvaExpr),
     Write(XvaOperand, XvaRegister),
     Jump(Symbol),
@@ -81,23 +142,26 @@ pub enum XvaStatement {
     RawInstr(Instruction),
     OptGate(BarrierKind, u32),
     EndOptGate(u32),
+    Noop(NoopKind),
+    Elaborated(Vec<XvaStatement>),
+    Use(Vec<XvaRegister>, UseKind),
+    Fallthrough,
 }
 
 impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaStatement> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
-            XvaStatement::Label(symbol) => f.write_fmt(format_args!("{symbol}:")),
-            XvaStatement::Expr(expr) => PrettyPrinter(expr, self.1).fmt(f),
+            XvaStatement::Expr(expr) => PrettyPrinter(expr, self.1, self.2).fmt(f),
             XvaStatement::Write(op, reg) => f.write_fmt(format_args!(
                 "write {}, {}",
-                PrettyPrinter(op, self.1),
-                PrettyPrinter(reg, self.1)
+                PrettyPrinter(op, self.1, self.2),
+                PrettyPrinter(reg, self.1, self.2)
             )),
             XvaStatement::Jump(symbol) => f.write_fmt(format_args!("jump {symbol}")),
             XvaStatement::Tailcall { dest, params } => f.write_fmt(format_args!(
                 "tailcall {} ({})",
-                PrettyPrinter(dest, self.1),
-                pretty_print_list(params, ", ", self.1),
+                PrettyPrinter(dest, self.1, self.2),
+                pretty_print_list(params, ", ", self.1, self.2),
             )),
             XvaStatement::Call {
                 dest,
@@ -106,18 +170,33 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaStatement> {
                 call_clobber_regs,
             } => f.write_fmt(format_args!(
                 "call {} ({}) -> {} clobbers [{}]",
-                PrettyPrinter(dest, self.1),
-                pretty_print_list(params, ", ", self.1),
-                pretty_print_list(ret_val, ", ", self.1),
-                pretty_print_list(call_clobber_regs, ", ", self.1)
+                PrettyPrinter(dest, self.1, self.2),
+                pretty_print_list(params, ", ", self.1, self.2),
+                pretty_print_list(ret_val, ", ", self.1, self.2),
+                pretty_print_list(call_clobber_regs, ", ", self.1, self.2)
             )),
             XvaStatement::Return => f.write_str("return"),
             XvaStatement::Trap(trap) => f.write_fmt(format_args!("trap {trap}")),
-            XvaStatement::RawInstr(instruction) => todo!(),
+            XvaStatement::RawInstr(instruction) => {
+                f.write_str("raw ")?;
+                PrettyPrinter(instruction, self.1, self.2).fmt(f)
+            }
             XvaStatement::OptGate(barrier_kind, id) => {
                 f.write_fmt(format_args!("opt barrier {id} {{{barrier_kind}}}"))
             }
             XvaStatement::EndOptGate(id) => f.write_fmt(format_args!("end opt barrier {id}")),
+            XvaStatement::Noop(noop) => match noop {
+                NoopKind::Normal => f.write_str("nop"),
+                NoopKind::PauseHint => f.write_str("pause"),
+            },
+            XvaStatement::Elaborated(stmts) => {
+                pretty_print_list(stmts, "\n\t", self.1, self.2).fmt(f)
+            }
+            XvaStatement::Use(reg, kind) => f.write_fmt(format_args!(
+                "use {kind} {}",
+                pretty_print_list(reg, ", ", self.1, self.2)
+            )),
+            XvaStatement::Fallthrough => f.write_str("fallthrough"),
         }
     }
 }
@@ -131,16 +210,16 @@ pub struct XvaExpr {
 
 impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaExpr> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        PrettyPrinter(&self.0.dest, self.1).fmt(f)?;
+        PrettyPrinter(&self.0.dest, self.1, self.2).fmt(f)?;
 
         if let Some(dest2) = self.0.dest2 {
             f.write_str(", ")?;
-            PrettyPrinter(&dest2, self.1).fmt(f)?;
+            PrettyPrinter(&dest2, self.1, self.2).fmt(f)?;
         }
 
         f.write_str(" = ")?;
 
-        PrettyPrinter(&self.0.op, self.1).fmt(f)
+        PrettyPrinter(&self.0.op, self.1, self.2).fmt(f)
     }
 }
 
@@ -165,13 +244,15 @@ impl core::fmt::Display for XvaConst {
 pub enum XvaOperand {
     Register(XvaRegister),
     Const(XvaConst),
+    FrameAddr(i32),
 }
 
 impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaOperand> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
-            XvaOperand::Register(reg) => PrettyPrinter(reg, self.1).fmt(f),
+            XvaOperand::Register(reg) => PrettyPrinter(reg, self.1, self.2).fmt(f),
             XvaOperand::Const(cn) => cn.fmt(f),
+            XvaOperand::FrameAddr(op) => f.write_fmt(format_args!("frame_addr {op}")),
         }
     }
 }
@@ -181,13 +262,13 @@ pub enum XvaOpcode {
     ZeroInit,
     Const(XvaConst),
     Uninit,
-    Alloca(XvaType),
     Move(XvaRegister),
     ComputeAddr {
         base: XvaOperand,
         size: u32,
         index: XvaOperand,
     },
+    GetFrameAddr(i32),
     BinaryOp {
         op: BinaryOp,
         left: XvaRegister,
@@ -220,19 +301,19 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaOpcode> {
             XvaOpcode::ZeroInit => f.write_str("zeroinit"),
             XvaOpcode::Const(xva) => f.write_fmt(format_args!("const {xva}")),
             XvaOpcode::Uninit => f.write_str("uninit"),
-            XvaOpcode::Alloca(ty) => f.write_fmt(format_args!("alloca {ty}")),
+            XvaOpcode::GetFrameAddr(offset) => f.write_fmt(format_args!("frame_addr {offset}")),
             XvaOpcode::Move(reg) => {
-                f.write_fmt(format_args!("move {}", PrettyPrinter(reg, self.1)))
+                f.write_fmt(format_args!("move {}", PrettyPrinter(reg, self.1, self.2)))
             }
             XvaOpcode::ComputeAddr { base, size, index } => f.write_fmt(format_args!(
                 "compaddr {} + {size}*{}",
-                PrettyPrinter(base, self.1),
-                PrettyPrinter(index, self.1)
+                PrettyPrinter(base, self.1, self.2),
+                PrettyPrinter(index, self.1, self.2)
             )),
             XvaOpcode::BinaryOp { op, left, right } => f.write_fmt(format_args!(
                 "{op} {}, {}",
-                PrettyPrinter(left, self.1),
-                PrettyPrinter(right, self.1)
+                PrettyPrinter(left, self.1, self.2),
+                PrettyPrinter(right, self.1, self.2)
             )),
             XvaOpcode::CheckedBinaryOp {
                 op,
@@ -241,22 +322,24 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaOpcode> {
                 right,
             } => f.write_fmt(format_args!(
                 "checked {op} {mode} {}, {}",
-                PrettyPrinter(left, self.1),
-                PrettyPrinter(right, self.1)
+                PrettyPrinter(left, self.1, self.2),
+                PrettyPrinter(right, self.1, self.2)
             )),
             XvaOpcode::UnaryOp { op, left } => {
-                f.write_fmt(format_args!("{op} {}", PrettyPrinter(left, self.1)))
+                f.write_fmt(format_args!("{op} {}", PrettyPrinter(left, self.1, self.2)))
             }
-            XvaOpcode::Read(op) => f.write_fmt(format_args!("read {}", PrettyPrinter(op, self.1))),
+            XvaOpcode::Read(op) => {
+                f.write_fmt(format_args!("read {}", PrettyPrinter(op, self.1, self.2)))
+            }
             XvaOpcode::UMul { left, right } => f.write_fmt(format_args!(
                 "umul {}, {}",
-                PrettyPrinter(left, self.1),
-                PrettyPrinter(right, self.1)
+                PrettyPrinter(left, self.1, self.2),
+                PrettyPrinter(right, self.1, self.2)
             )),
             XvaOpcode::SMul { left, right } => f.write_fmt(format_args!(
                 "smul {}, {}",
-                PrettyPrinter(left, self.1),
-                PrettyPrinter(right, self.1)
+                PrettyPrinter(left, self.1, self.2),
+                PrettyPrinter(right, self.1, self.2)
             )),
         }
     }
@@ -461,7 +544,14 @@ pub struct XvaFunction {
     pub params: Vec<XvaRegister>,
     pub preserve_regs: Vec<XvaRegister>,
     pub return_reg: Vec<XvaRegister>,
-    pub statement: Vec<XvaStatement>,
+    pub body: Vec<XvaBasicBlock>,
+    pub frame_size: usize,
+    pub frame_align: usize,
+    /// The largest power of 2 A, such that the address of the stack when the function is called is guaranteed to be A*v + O for some constant offset O
+    pub call_align: usize,
+    /// The value O, such that the address of the stack when the function is called is guaranteed to be A*v + O for some constant alignment A
+    pub call_align_offset: usize,
+    pub has_prologue: bool,
 }
 
 impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaFunction> {
@@ -473,7 +563,7 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaFunction> {
         for reg in &self.0.params {
             f.write_str(sep)?;
             sep = " ";
-            PrettyPrinter(reg, self.1).fmt(f)?;
+            PrettyPrinter(reg, self.1, self.2).fmt(f)?;
         }
         f.write_str("\n")?;
 
@@ -484,8 +574,22 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaFunction> {
         for reg in &self.0.preserve_regs {
             f.write_str(sep)?;
             sep = " ";
-            PrettyPrinter(reg, self.1).fmt(f)?;
+            PrettyPrinter(reg, self.1, self.2).fmt(f)?;
         }
+        f.write_str("\n")?;
+
+        f.write_str("FRAME: size ")?;
+        self.0.frame_size.fmt(f)?;
+        f.write_str(", align ")?;
+        self.0.frame_align.fmt(f)?;
+        f.write_str("\n")?;
+
+        f.write_str("CALL STACK: ")?;
+
+        f.write_str("align ")?;
+        self.0.call_align.fmt(f)?;
+        f.write_str(" offset ")?;
+        self.0.call_align_offset.fmt(f)?;
         f.write_str("\n")?;
 
         f.write_str("RETURN: ")?;
@@ -495,13 +599,12 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaFunction> {
         for reg in &self.0.return_reg {
             f.write_str(sep)?;
             sep = " ";
-            PrettyPrinter(reg, self.1).fmt(f)?;
+            PrettyPrinter(reg, self.1, self.2).fmt(f)?;
         }
         f.write_str("\n")?;
 
-        for stmt in &self.0.statement {
-            f.write_str("\t")?;
-            PrettyPrinter(stmt, self.1).fmt(f)?;
+        for bb in &self.0.body {
+            PrettyPrinter(bb, self.1, self.2).fmt(f)?;
             f.write_str("\n")?;
         }
 
@@ -517,8 +620,12 @@ pub struct XvaFile {
 }
 
 impl XvaFile {
-    pub fn pretty_print<'a>(&'a self, mach: &'a dyn Machine) -> PrettyPrinter<'a, XvaFile> {
-        PrettyPrinter(self, mach)
+    pub fn pretty_print<'a>(
+        &'a self,
+        mach: &'a dyn Machine,
+        mode: MachineMode,
+    ) -> PrettyPrinter<'a, XvaFile> {
+        PrettyPrinter(self, mach, mode)
     }
 }
 
@@ -529,11 +636,11 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaFile> {
         }
 
         for func in &self.0.functions {
-            PrettyPrinter(func, self.1).fmt(f)?;
+            PrettyPrinter(func, self.1, self.2).fmt(f)?;
         }
 
         for def in &self.0.objects {
-            PrettyPrinter(def, self.1).fmt(f)?;
+            PrettyPrinter(def, self.1, self.2).fmt(f)?;
         }
         Ok(())
     }
@@ -566,7 +673,7 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaFunctionDef> {
             "{linkage} function {label} (section {section}):\n"
         ))?;
 
-        PrettyPrinter(body, self.1).fmt(f)?;
+        PrettyPrinter(body, self.1, self.2).fmt(f)?;
 
         f.write_fmt(format_args!("end function {label}\n"))
     }
@@ -650,3 +757,6 @@ pub struct XvaRelocation {
 }
 
 use crate::fmt::PrettyPrinter;
+
+pub mod opt;
+pub mod regalloc;

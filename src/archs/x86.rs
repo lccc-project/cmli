@@ -2,6 +2,7 @@ use crate::{
     compiler::CompilerSpec,
     mach::{MachineMode, MachineSpec, Opcode, Register, RegisterSpec},
     traits::{AsId, AsRawId, IdType, Name},
+    xva::XvaCategory,
 };
 
 use crate::instr::RegisterKind;
@@ -22,12 +23,12 @@ impl X86Mode {
         X86Mode::Long,
     ];
 
-    pub fn largest_gpr(&self) -> u32 {
+    pub fn largest_gpr(&self) -> GprSize {
         match self {
-            X86Mode::Real => 16,
-            X86Mode::Protected16 => 16,
-            X86Mode::Protected => 32,
-            X86Mode::Long => 64,
+            X86Mode::Real => GprSize::Word,
+            X86Mode::Protected16 => GprSize::Word,
+            X86Mode::Protected => GprSize::Double,
+            X86Mode::Long => GprSize::Quad,
         }
     }
 }
@@ -193,7 +194,7 @@ macro_rules! define_x86_registers {
 
             fn size(&self, m: X86Mode) -> u32 {
                 match self {
-                    $(Self::$class(_) => ($($size,)? m.largest_gpr() / 8,).0),*
+                    $(Self::$class(_) => ($($size,)? m.largest_gpr().bits() / 8,).0),*
                 }
             }
 
@@ -242,6 +243,7 @@ define_x86_registers! {
         Control [, #cr _ 0..32] @ Custom(RegisterKind::System) = RegisterKind::System,
         Debug [, #dr _ 0..32] @ Custom(RegisterKind::System) = RegisterKind::System,
         ExtControl [, #xcr _ 0..32] @ Custom(RegisterKind::System) = RegisterKind::System,
+        X87SysReg [fcw, fsw, ftw] @ Custom(RegisterKind::System) = RegisterKind::System,
     }
 }
 
@@ -260,6 +262,16 @@ impl GprSize {
             Self::Word => 2,
             Self::Double => 4,
             Self::Quad => 8,
+        }
+    }
+
+    pub const fn from_size(val: u32) -> Self {
+        match val.next_power_of_two() {
+            1 => Self::Byte,
+            2 => Self::Word,
+            4 => Self::Double,
+            8 => Self::Quad,
+            _ => panic!("Invalid size class"),
         }
     }
 
@@ -406,6 +418,47 @@ impl RegisterSpec for X86Register {
     fn category(&self, _: Self::MachineMode) -> crate::xva::XvaCategory {
         self.category()
     }
+
+    fn from_bit(bit: u32, mode: Self::MachineMode) -> Option<Self> {
+        match bit {
+            n @ 0..32 => match mode {
+                X86Mode::Real | X86Mode::Protected16 => Some(X86Register::Word(n as u8)),
+                X86Mode::Protected => Some(X86Register::Double(n as u8)),
+                X86Mode::Long => Some(X86Register::Quad(n as u8)),
+            },
+            n @ 32..64 => Some(X86Register::Xmm((n & 31) as u8)),
+            n @ 64..70 => Some(X86Register::Segment((n & 7) as u8)),
+            n @ 76..80 => Some(X86Register::ByteLegacy((n & 7) as u8)),
+            n @ 80..88 => Some(X86Register::Tmm((n & 7) as u8)),
+            n @ 88..96 => Some(X86Register::Kreg((n & 7) as u8)),
+            n @ 96..104 => Some(X86Register::St((n & 7) as u8)),
+            n @ 0x68..0x6B => Some(X86Register::X87SysReg((n & 7) as u8)),
+
+            n => None,
+        }
+    }
+
+    fn regmap_bit(self) -> Option<u32> {
+        match self {
+            X86Register::ByteLegacy(n @ 4..7) => Some(0x48 | n as u32),
+            X86Register::ByteLegacy(n)
+            | X86Register::Byte(n)
+            | X86Register::ByteRex(n)
+            | X86Register::Word(n)
+            | X86Register::Double(n)
+            | X86Register::Quad(n) => Some(n as u32),
+            X86Register::Segment(n) => Some(0x40 | n as u32),
+            X86Register::St(n) => Some(0x60 | n as u32),
+            X86Register::Mmx(n) => Some(0x60 | ((8 - n) & 7) as u32),
+            X86Register::Xmm(n) | X86Register::Ymm(n) | X86Register::Zmm(n) => {
+                Some(0x20 | n as u32)
+            }
+            X86Register::Tmm(n) => Some(0x50 | n as u32),
+            X86Register::Kreg(n) => Some(0x58 | n as u32),
+            X86Register::Control(_) | X86Register::Debug(_) | X86Register::ExtControl(_) => None,
+            X86Register::X87SysReg(n) => Some(0x68 | n as u32),
+        }
+    }
 }
 
 #[macro_export]
@@ -489,8 +542,66 @@ impl MachineSpec for X86 {
     fn name(&self) -> &'static str {
         "x86"
     }
+
+    fn pretty_print_size(&self, size: usize) -> Option<&'static str> {
+        match size {
+            1 => Some("byte"),
+            2 => Some("word"),
+            4 => Some("dword"),
+            8 => Some("qword"),
+            10 => Some("tbyte"),
+            16 => Some("xmmword"),
+            32 => Some("ymmword"),
+            64 => Some("zmmword"),
+            1024 => Some("tmmword"),
+            _ => None,
+        }
+    }
 }
 
 impl CompilerSpec for X86 {
     type Machine = Self;
+
+    fn available_registers(
+        &self,
+        context: &crate::compiler::CompilerContext,
+        mode: Self::MachineMode,
+        cat: crate::xva::XvaCategory,
+        size: u32,
+    ) -> Option<&[Register]> {
+        None
+    }
+
+    fn promote_size(
+        &self,
+        context: &crate::compiler::CompilerContext,
+        mode: X86Mode,
+        cat: XvaCategory,
+        size: u32,
+    ) -> Option<u32> {
+        match (cat, size) {
+            (XvaCategory::Int, size @ ..=8) => {
+                if size > mode.largest_gpr().size() {
+                    None
+                } else {
+                    Some(size.next_power_of_two())
+                }
+            }
+            (XvaCategory::Float, size @ (4 | 8)) => {
+                if context.target_features.contains("sse") {
+                    Some(size)
+                } else {
+                    Some(10)
+                }
+            }
+            (XvaCategory::Float, 10) => Some(10),
+            (XvaCategory::Float, size) => Some(size.next_power_of_two()), // Must be promoted to an sse register, which may error
+            (
+                XvaCategory::VectorAny | XvaCategory::VectorFloat | XvaCategory::VectorInt,
+                size @ ..=64,
+            ) => Some(size.next_power_of_two()),
+            (XvaCategory::Condition, 1) => Some(1),
+            _ => None,
+        }
+    }
 }

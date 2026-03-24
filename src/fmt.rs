@@ -1,25 +1,53 @@
-use crate::mach::Machine;
+use crate::mach::{Machine, MachineMode};
 
 use core::cell::Cell;
+use std::ops::Deref;
 
-pub struct PrettyPrinter<'a, T>(pub(crate) &'a T, pub(crate) &'a dyn Machine);
+pub struct PrettyPrinter<'a, T>(
+    pub(crate) &'a T,
+    pub(crate) &'a dyn Machine,
+    pub(crate) MachineMode,
+);
+
+impl<'a, T> Deref for PrettyPrinter<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
 
 pub trait PrettyPrint {
-    fn fmt(&self, f: &mut core::fmt::Formatter, mach: &dyn Machine) -> core::fmt::Result;
+    fn fmt(
+        &self,
+        f: &mut core::fmt::Formatter,
+        mach: &dyn Machine,
+        mode: MachineMode,
+    ) -> core::fmt::Result;
 }
 
 impl<T> PrettyPrint for T
 where
     for<'a> PrettyPrinter<'a, T>: core::fmt::Display,
 {
-    fn fmt(&self, f: &mut core::fmt::Formatter, mach: &dyn Machine) -> core::fmt::Result {
-        core::fmt::Display::fmt(&PrettyPrinter(self, mach), f)
+    fn fmt(
+        &self,
+        f: &mut core::fmt::Formatter,
+        mach: &dyn Machine,
+        mode: MachineMode,
+    ) -> core::fmt::Result {
+        core::fmt::Display::fmt(&PrettyPrinter(self, mach, mode), f)
     }
 }
 
 impl<'a, T: PrettyPrint> PrettyPrint for &'a T {
-    fn fmt(&self, f: &mut core::fmt::Formatter, mach: &dyn Machine) -> core::fmt::Result {
-        <T as PrettyPrint>::fmt(self, f, mach)
+    fn fmt(
+        &self,
+        f: &mut core::fmt::Formatter,
+        mach: &dyn Machine,
+        mode: MachineMode,
+    ) -> core::fmt::Result {
+        <T as PrettyPrint>::fmt(self, f, mach, mode)
     }
 }
 
@@ -46,7 +74,7 @@ where
     }
 }
 
-pub struct PrettyPrintList<'a, I>(Cell<Option<I>>, &'static str, &'a dyn Machine);
+pub struct PrettyPrintList<'a, I>(Cell<Option<I>>, &'static str, &'a dyn Machine, MachineMode);
 
 impl<'a, I: Iterator> core::fmt::Display for PrettyPrintList<'a, I>
 where
@@ -61,7 +89,7 @@ where
         for elem in iter {
             f.write_str(sep)?;
 
-            elem.fmt(f, self.2)?;
+            elem.fmt(f, self.2, self.3)?;
             sep = sep_str;
         }
 
@@ -80,9 +108,10 @@ pub fn pretty_print_list<'a, I: IntoIterator>(
     list: I,
     sep: &'static str,
     mach: &'a dyn Machine,
+    mode: MachineMode,
 ) -> PrettyPrintList<'a, I::IntoIter>
 where
     I::Item: PrettyPrint,
 {
-    PrettyPrintList(Cell::new(Some(list.into_iter())), sep, mach)
+    PrettyPrintList(Cell::new(Some(list.into_iter())), sep, mach, mode)
 }

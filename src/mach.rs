@@ -1,6 +1,7 @@
 use crate::{
     compiler::CompilerSpec,
-    instr::RegisterKind,
+    fmt::PrettyPrinter,
+    instr::{Instruction, RegisterKind},
     traits::{AsId, IdType, Name},
     xva::XvaCategory,
 };
@@ -17,7 +18,7 @@ impl const AsId<MachineMode> for OneMachine {}
 
 pub const ONE_MACHINE: &[MachineMode] = as_id_array!([OneMachine::Singleton] => MachineMode);
 
-pub trait RegisterSpec: AsId<Register> + Name {
+pub trait RegisterSpec: AsId<Register> + Name + Sized {
     type MachineMode: AsId<MachineMode>;
     /// The Kind of the register
     fn kind(&self) -> RegisterKind;
@@ -32,6 +33,10 @@ pub trait RegisterSpec: AsId<Register> + Name {
 
     /// Checks whether or not two different registers overlap (IE. refer to different slices of the same register)
     fn overlaps(&self, other: &Self) -> bool;
+
+    fn from_bit(bit: u32, mode: Self::MachineMode) -> Option<Self>;
+
+    fn regmap_bit(self) -> Option<u32>;
 }
 
 pub trait MachineSpec: Sized {
@@ -47,6 +52,10 @@ pub trait MachineSpec: Sized {
     fn name(&self) -> &'static str;
 
     fn as_compiler(&self) -> &Self::Compiler;
+
+    fn pretty_print_size(&self, size: usize) -> Option<&'static str> {
+        None
+    }
 }
 
 mod private {
@@ -98,6 +107,10 @@ macro_rules! machine_helper {
 impl<M: MachineSpec> Machine for M {
     fn name(&self) -> &'static str {
         <Self as MachineSpec>::name(self)
+    }
+
+    fn pretty_print_size(&self, size: usize) -> Option<&'static str> {
+        <Self as MachineSpec>::pretty_print_size(self, size)
     }
 
     machine_helper!(
@@ -159,6 +172,21 @@ impl<M: MachineSpec> Machine for M {
                     (_, None) => panic!("Unknown MachineMode"),
                 }
             }
+
+            fn regmap_bit(&self, reg: Register) -> Option<u32> {
+                match reg.downcast::<This::Register>() {
+                    Some(reg) => reg.regmap_bit(),
+                    None => panic!("Unknown Register"),
+                }
+            }
+            fn regmap_from_bit(&self, bit: u32, mode: MachineMode) -> Option<Register> {
+                match mode.downcast::<This::MachineMode>() {
+                    Some(mode) => {
+                        <This as MachineSpec>::Register::from_bit(bit, mode).map(Register::new)
+                    }
+                    None => panic!("Unknown MachineMode"),
+                }
+            }
         }
     );
     machine_helper!(
@@ -173,6 +201,9 @@ pub trait Machine {
     fn opcodes(&self) -> &(dyn DynList<Opcode> + '_);
     fn registers(&self) -> &(dyn Registers + '_);
     fn modes(&self) -> &(dyn DynList<MachineMode> + '_);
+    fn pretty_print_size(&self, size: usize) -> Option<&'static str> {
+        None
+    }
 }
 
 macro_rules! impl_machine_helper {
@@ -216,14 +247,98 @@ pub trait Registers: DynList<Register> {
     fn register_align(&self, reg: Register, mode: MachineMode) -> u32;
     fn register_category(&self, reg: Register, mode: MachineMode) -> XvaCategory;
 
+    fn regmap_bit(&self, reg: Register) -> Option<u32>;
+    fn regmap_from_bit(&self, bit: u32, mode: MachineMode) -> Option<Register>;
+
     fn register_overlaps(&self, reg1: Register, reg2: Register) -> bool;
 }
 
 #[derive(IdType, Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Opcode(NonZeroU64, u64);
 
+impl<'a> core::fmt::Display for PrettyPrinter<'a, Opcode> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.1.opcodes().name_of(*self.0))
+    }
+}
+
 #[derive(IdType, Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct MachineMode(NonZeroU64, u64);
 
+impl<'a> core::fmt::Display for PrettyPrinter<'a, MachineMode> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.1.modes().name_of(*self.0))
+    }
+}
+
 #[derive(IdType, Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Register(NonZeroU64, u64);
+
+impl<'a> core::fmt::Display for PrettyPrinter<'a, Register> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.1.registers().name_of(*self.0))
+    }
+}
+
+const REGSET_SIZE: usize = 4;
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub struct Regset([u64; REGSET_SIZE]);
+
+impl IntoIterator for Regset {
+    type IntoIter = RegSetIter;
+    type Item = RegsetBit;
+
+    fn into_iter(self) -> Self::IntoIter {
+        RegSetIter(self.0.into_iter(), 0, 0)
+    }
+}
+
+impl FromIterator<RegsetBit> for Regset {
+    fn from_iter<T: IntoIterator<Item = RegsetBit>>(iter: T) -> Self {
+        let mut v = const { Regset([0; REGSET_SIZE]) };
+        v.extend(iter);
+        v
+    }
+}
+
+impl Extend<RegsetBit> for Regset {
+    fn extend<T: IntoIterator<Item = RegsetBit>>(&mut self, iter: T) {
+        for bit in iter {
+            let idx = (bit.0 >> 6) as usize;
+            self.0[idx] |= (1 << (bit.0 & 63));
+        }
+    }
+}
+
+pub struct RegSetIter(core::array::IntoIter<u64, REGSET_SIZE>, u64, u32);
+
+impl Iterator for RegSetIter {
+    type Item = RegsetBit;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.1 == 0 {
+            self.2 = (self.2 & 63) + 64;
+            self.1 = self.0.next()?;
+        }
+
+        let p = self.1.trailing_zeros();
+        self.1 >>= p + 1;
+        let val = self.2 + p;
+        self.2 += p + 1;
+
+        Some(RegsetBit(self.2))
+    }
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub struct RegsetBit(u32);
+
+impl<'a> core::fmt::Display for PrettyPrinter<'a, RegsetBit> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.1.registers().regmap_from_bit(self.0.0, self.2) {
+            Some(reg) => f.write_str(self.1.registers().name_of(reg)),
+            None => f.write_str("/*UNKNOWN REGISTER*/"),
+        }
+    }
+}
