@@ -242,8 +242,8 @@ define_x86_registers! {
         Kreg [, #k _ 0..32] (8) @ VectorInt = RegisterKind::VectorBit,
         Control [, #cr _ 0..32] @ Custom(RegisterKind::System) = RegisterKind::System,
         Debug [, #dr _ 0..32] @ Custom(RegisterKind::System) = RegisterKind::System,
-        ExtControl [, #xcr _ 0..32] @ Custom(RegisterKind::System) = RegisterKind::System,
-        X87SysReg [fcw, fsw, ftw] @ Custom(RegisterKind::System) = RegisterKind::System,
+        ExtControl [, #xcr _ 0..32] (8) @ Custom(RegisterKind::System) = RegisterKind::System,
+        X87SysReg [fcw, fsw, ftw] (2) @ Custom(RegisterKind::System) = RegisterKind::System,
     }
 }
 
