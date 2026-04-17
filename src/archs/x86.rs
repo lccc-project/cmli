@@ -680,9 +680,6 @@ impl X86 {
                     panic!("Encountered virtual register in preg")
                 };
 
-                if preg == Register::new(dest) {
-                    return None
-                }
                 match dest {
                     X86Register::Byte(_) |
                     X86Register::ByteLegacy(_) |

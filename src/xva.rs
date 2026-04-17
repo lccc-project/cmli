@@ -695,7 +695,6 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaFunction> {
 
         for bb in &self.0.body {
             PrettyPrinter(bb, self.1, self.2).fmt(f)?;
-            f.write_str("\n")?;
         }
 
         Ok(())

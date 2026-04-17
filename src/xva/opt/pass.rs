@@ -461,6 +461,10 @@ impl RemoveUnused {
                         .map_or(false, |v| state.used_regs.contains(&v))
                 {
                     *stmt = XvaStatement::Elaborated(vec![]);
+                } else if let XvaOpcode::Move(reg) = &xva_expr.op {
+                    if state.pass.test_barrier(BarrierKind::ELIDE_REGISTERS | BarrierKind::ELIDE_STORE | BarrierKind::ELIDE_INSTRS) && xva_expr.dest == *reg {
+                        *stmt = XvaStatement::Elaborated(vec![]);
+                    }
                 }
             }
             _ => {}
