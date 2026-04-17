@@ -3,7 +3,7 @@ use std::num::{NonZeroI64, NonZeroU32};
 use crate::{
     fmt::{PrettyPrinter, pretty_print_list},
     intern::Symbol,
-    mach::{MachineMode, Opcode, Register},
+    mach::{MachineMode, Opcode, Register}, traits::{AsId, IdType},
 };
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
@@ -31,6 +31,13 @@ pub struct Instruction {
 }
 
 impl Instruction {
+    pub const fn new(opcode: Opcode, operands: Vec<Operand>) -> Self {
+        Self {mode_override: None, prefixes: vec![], backing: opcode, operands}
+    }
+
+    pub const fn new_nullary<O: const AsId<Opcode>>(op: O) -> Self {
+        Self::new(Opcode::new(op), vec![])
+    }
     pub fn mode_override(&self) -> Option<MachineMode> {
         self.mode_override
     }

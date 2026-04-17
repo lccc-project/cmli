@@ -1,8 +1,5 @@
 use crate::{
-    compiler::CompilerSpec,
-    mach::{MachineMode, MachineSpec, Opcode, Register, RegisterSpec},
-    traits::{AsId, AsRawId, IdType, Name},
-    xva::XvaCategory,
+    compiler::CompilerSpec, instr::{AddressKind, Instruction, Operand, RelocSym}, mach::{MachineMode, MachineSpec, Opcode, Register, RegisterSpec}, traits::{AsId, AsRawId, IdType, Name}, xva::{BinaryOp, XvaCategory, XvaExpr, XvaOpcode, XvaRegister, XvaStatement}
 };
 
 use crate::instr::RegisterKind;
@@ -30,6 +27,10 @@ impl X86Mode {
             X86Mode::Protected => GprSize::Double,
             X86Mode::Long => GprSize::Quad,
         }
+    }
+
+    pub fn supports_rel_addr(&self) -> bool {
+        matches!(self, X86Mode::Long)
     }
 }
 
@@ -286,6 +287,37 @@ impl GprSize {
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
+pub enum GprName {
+    ax,
+    cx,
+    dx,
+    bx,
+    sp,
+    bp,
+    si,
+    di
+}
+
+impl GprName {
+    pub const fn as_reg(self, size: GprSize) -> X86Register {
+        let regno = self as u8;
+        match size {
+            GprSize::Byte => {
+                if regno < 3 {
+                    X86Register::Byte(regno)
+                } else {
+                    X86Register::ByteRex(regno)
+                }
+            },
+            GprSize::Word => X86Register::Word(regno),
+            GprSize::Double => X86Register::Double(regno),
+            GprSize::Quad => X86Register::Quad(regno),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum XmmSize {
     Xmm,
     Ymm,
@@ -464,14 +496,23 @@ impl RegisterSpec for X86Register {
 #[macro_export]
 macro_rules! x86_registers {
     [$($reg:ident),* $(,)?] => {
-        const { [$($crate::archs::x86::X86Register::from_name_impl(::core::stringify!($reg))),*]}
+        const { [$($crate::x86_register!($reg)),*]}
     }
 }
+
+#[macro_export]
+macro_rules! x86_register {
+    [$reg:ident] => {
+        const { $crate::archs::x86::X86Register::from_name_impl(::core::stringify!($reg))}
+    }
+}
+
 
 pub enum X86OperandKind {
     Register(X86RegisterClass),
     Immediate,
     Memory(X86RegisterClass),
+    RelAddr,
 }
 
 macro_rules! x86_instructions {
@@ -479,7 +520,7 @@ macro_rules! x86_instructions {
         $vis:vis enum $name:ident {
             $(#[prefix] $prefix_name:ident ($prefix_mnemonic:literal) = $prefix_opcode:literal;)*
             $($instr_name:ident ($mnemonic:literal) {
-                $([$($operand:pat),+ $(,)?] $($mode:pat)? => $opcode:literal),+ $(,)?
+                $([$($frag:tt @ $operand:pat),* $(,)?] $($mode:pat)? => $opcode:literal $(+ $regno:expr)?),+ $(,)?
             })*
         }
     } => {
@@ -518,7 +559,45 @@ x86_instructions! {
         #[prefix] Rep ("rep") = 0xF3;
         #[prefix] Wait ("fwait") = 0x9B;
         Add ("add") {
-            [Memory(X86RegisterClass::Byte) | Register(X86RegisterClass::Byte), Register(X86RegisterClass::Byte)] => 0x00,
+            [_ @ Memory(X86RegisterClass::Byte) | Register(X86RegisterClass::Byte), _ @ Register(X86RegisterClass::Byte)] => 0x00,
+        }
+        Sub ("sub") {
+            [_ @ Memory(X86RegisterClass::Byte) | Register(X86RegisterClass::Byte), _ @ Register(X86RegisterClass::Byte)] => 0x28,
+        }
+        Or ("sub") {
+            [_ @ Memory(X86RegisterClass::Byte) | Register(X86RegisterClass::Byte), _ @ Register(X86RegisterClass::Byte)] => 0x08,
+        }
+        And ("and") {
+            [_ @ Memory(X86RegisterClass::Byte) | Register(X86RegisterClass::Byte), _ @ Register(X86RegisterClass::Byte)] => 0x20,
+        }
+        Xor ("xor") {
+            [_ @ Memory(X86RegisterClass::Byte) | Register(X86RegisterClass::Byte), _ @ Register(X86RegisterClass::Byte)] => 0x30,
+        }
+        Mov ("mov") {
+            [_ @ Memory(X86RegisterClass::Byte) | Register(X86RegisterClass::Byte), _ @ Register(X86RegisterClass::Byte)] => 0x88,
+        }
+        Lea ("lea") {
+            [_ @ Register(X86RegisterClass::Word | X86RegisterClass::Double | X86RegisterClass::Quad), _ @  Memory(_)] => 0x8D,
+        }
+        Call ("call") {
+            [_ @ RelAddr] => 0xE8,
+        }
+        Jump ("jmp") {
+            [_ @ RelAddr] => 0xE9,
+        }
+
+        Ud2 ("ud2") {
+            [] => 0x0F0B
+        }
+        Push ("push") {
+            [dest @ Register(X86RegisterClass::Word | X86RegisterClass::Double | X86RegisterClass::Quad)] => 0x50 + (dest.regno() & 7),
+        }
+        Pop ("pop") {
+            [dest @ Register(X86RegisterClass::Word | X86RegisterClass::Double | X86RegisterClass::Quad)] => 0x58 + (dest.regno() & 7),
+        }
+        Ret ("ret") {
+            [] => 0xC3,
+            [_ @ Immediate] => 0xC2
         }
     }
 }
@@ -555,6 +634,133 @@ impl MachineSpec for X86 {
             64 => Some("zmmword"),
             1024 => Some("tmmword"),
             _ => None,
+        }
+    }
+}
+
+impl X86 {
+    fn opcode_for_expr(&self, dest: X86Register, dest2: Option<X86Register>, expr: &XvaOpcode) -> Option<X86Opcode>{
+        match expr {
+            XvaOpcode::ZeroInit => {
+                match dest {
+                    X86Register::Byte(_) |
+                    X86Register::ByteLegacy(_) |
+                    X86Register::ByteRex(_) |
+                    X86Register::Word(_) |
+                    X86Register::Double(_) |
+                    X86Register::Quad(_) => {
+                        Some(X86Opcode::Xor)
+                    },
+                    
+                    X86Register::Mmx(_) => todo!(),
+                    X86Register::Xmm(_) => todo!(),
+                    X86Register::Ymm(_) => todo!(),
+                    X86Register::Zmm(_) => todo!(),
+                    X86Register::Tmm(_) => todo!(),
+                    X86Register::Kreg(_) => todo!(),
+                    X86Register::St(_) => todo!(),
+                    X86Register::Segment(_) |
+                    X86Register::Control(_) |
+                    X86Register::Debug(_) |
+                    X86Register::ExtControl(_) |
+                    X86Register::X87SysReg(_) => panic!("Cannot support zeroinit of these registers"),
+                }
+            },
+            
+            XvaOpcode::Uninit => None,
+            XvaOpcode::Const(val) => {
+                match val {
+                    crate::xva::XvaConst::Bits(_) => Some(X86Opcode::Mov),
+                    crate::xva::XvaConst::Label(_) |
+                    crate::xva::XvaConst::Global(_, _) => Some(X86Opcode::Lea),
+                }
+            },
+            XvaOpcode::Move(src) => {
+                let XvaRegister::Physical(preg) = *src else {
+                    panic!("Encountered virtual register in preg")
+                };
+
+                if preg == Register::new(dest) {
+                    return None
+                }
+                match dest {
+                    X86Register::Byte(_) |
+                    X86Register::ByteLegacy(_) |
+                    X86Register::ByteRex(_) |
+                    X86Register::Word(_) |
+                    X86Register::Double(_) |
+                    X86Register::Quad(_) |
+                    X86Register::Control(_) |
+                    X86Register::Debug(_) |
+                    X86Register::Segment(_) => Some(X86Opcode::Mov),
+                    X86Register::St(_) => todo!("st"),
+                    X86Register::Mmx(_) => todo!("mmx"),
+                    X86Register::Xmm(_) => todo!("xmm"),
+                    X86Register::Ymm(_) => todo!("ymm"),
+                    X86Register::Zmm(_) => todo!("zmm"),
+                    X86Register::Tmm(_) => todo!("tmm"),
+                    X86Register::Kreg(_) => todo!("kreg"),
+                    X86Register::ExtControl(_) => todo!("xcr"),
+                    X86Register::X87SysReg(_) => panic!("Cannot move to a fsw/fcw/ftw/mxcsr (need to use read)"),
+                }
+            },
+            XvaOpcode::ComputeAddr { base, size, index } => todo!(),
+            XvaOpcode::GetFrameAddr(_) => todo!(),
+            XvaOpcode::BinaryOp { op, left, right } => {
+                match (*op, dest) {
+                    (BinaryOp::Add, X86Register::Byte(_) |
+                        X86Register::ByteLegacy(_) |
+                        X86Register::ByteRex(_) |
+                        X86Register::Word(_) |
+                        X86Register::Double(_) |
+                        X86Register::Quad(_)
+                    ) => {
+                        Some(X86Opcode::Add)
+                    }
+                    (BinaryOp::Sub, X86Register::Byte(_) |
+                        X86Register::ByteLegacy(_) |
+                        X86Register::ByteRex(_) |
+                        X86Register::Word(_) |
+                        X86Register::Double(_) |
+                        X86Register::Quad(_)
+                    ) => {
+                        Some(X86Opcode::Sub)
+                    }
+                    (BinaryOp::And, X86Register::Byte(_) |
+                        X86Register::ByteLegacy(_) |
+                        X86Register::ByteRex(_) |
+                        X86Register::Word(_) |
+                        X86Register::Double(_) |
+                        X86Register::Quad(_)
+                    ) => {
+                        Some(X86Opcode::And)
+                    }
+                    (BinaryOp::Or, X86Register::Byte(_) |
+                        X86Register::ByteLegacy(_) |
+                        X86Register::ByteRex(_) |
+                        X86Register::Word(_) |
+                        X86Register::Double(_) |
+                        X86Register::Quad(_)
+                    ) => {
+                        Some(X86Opcode::Or)
+                    }
+                    (BinaryOp::Xor, X86Register::Byte(_) |
+                        X86Register::ByteLegacy(_) |
+                        X86Register::ByteRex(_) |
+                        X86Register::Word(_) |
+                        X86Register::Double(_) |
+                        X86Register::Quad(_)
+                    ) => {
+                        Some(X86Opcode::Xor)
+                    }
+                    _ => todo!("Combination")
+                }
+            },
+            XvaOpcode::CheckedBinaryOp { op, mode, left, right } => todo!(),
+            XvaOpcode::UnaryOp { op, left } => todo!(),
+            XvaOpcode::Read(xva_operand) => todo!(),
+            XvaOpcode::UMul { left, right } => todo!(),
+            XvaOpcode::SMul { left, right } => todo!(),
         }
     }
 }
@@ -603,5 +809,188 @@ impl CompilerSpec for X86 {
             (XvaCategory::Condition, 1) => Some(1),
             _ => None,
         }
+    }
+
+    fn lower_mce(&self, stmt: &mut XvaStatement, mode: X86Mode) {
+        let instr = match stmt {
+            XvaStatement::Expr(xva_expr) => {
+                let XvaRegister::Physical(dest) = xva_expr.dest else {
+                    panic!("Virtual Register during mce")
+                };
+
+                let dest = dest.downcast::<X86Register>().expect("Non-x86 register encountered");
+                let dest2 = xva_expr.dest2.map(|v| {
+                    let XvaRegister::Physical(v2) = v else {
+                        panic!("Virtual Register during mce")
+                    };
+
+                    v2.downcast::<X86Register>().expect("Non x86-register encountered")
+                });
+
+                let Some(opcode) = self.opcode_for_expr(dest, dest2, &xva_expr.op) else {
+                    *stmt = XvaStatement::Elaborated(vec![]); 
+                    return;
+                };
+
+                let mut oprs = Vec::with_capacity(2);
+                oprs.push(Operand::Register(Register::new(dest)));
+
+                match &xva_expr.op {
+                    XvaOpcode::ZeroInit | XvaOpcode::Uninit => {
+                        oprs.push(Operand::Register(Register::new(dest)));
+                    },
+                    XvaOpcode::Const(xva_const) => {
+                        oprs.push(xva_const.to_readable(AddressKind::Default, AddressKind::GotRel, mode.supports_rel_addr(), None));
+                    },
+                    
+                    XvaOpcode::Move(reg) => {
+                        let XvaRegister::Physical(reg) = *reg else {
+                            panic!("Virtual Register during mce")
+                        };
+
+                        oprs.push(Operand::Register(reg))
+                    },
+                    XvaOpcode::ComputeAddr { base, size, index } => todo!(),
+                    XvaOpcode::GetFrameAddr(_) => todo!(),
+                    XvaOpcode::BinaryOp { op, left, right } => {
+                        let XvaRegister::Physical(left) = *left else {
+                            panic!("Virtual Register during mce")
+                        };
+
+                        if left != Register::new(dest) {
+                            oprs.push(Operand::Register(left));
+                        }
+
+                        let size = dest.size(mode);
+
+                        match right {
+                            crate::xva::XvaOperand::Register(reg) => {
+                                let XvaRegister::Physical(reg) = *reg else {
+                                    panic!("Virtual Register during mce")
+                                };
+                                oprs.push(Operand::Register(reg));
+                            },
+                            crate::xva::XvaOperand::Const(xva_const) => oprs.push(xva_const.to_readable(AddressKind::Default, AddressKind::Plt, mode.supports_rel_addr(), Some(size as usize))),
+                            crate::xva::XvaOperand::FrameAddr(_) => todo!(),
+                        }
+                    },
+                    XvaOpcode::CheckedBinaryOp { op, mode, left, right } => todo!(),
+                    XvaOpcode::UnaryOp { op, left } => todo!(),
+                    XvaOpcode::Read(xva_operand) => todo!(),
+                    XvaOpcode::UMul { left, right } => todo!(),
+                    XvaOpcode::SMul { left, right } => todo!(),
+                }
+
+                Instruction::new(Opcode::new(opcode), oprs)
+            },
+            XvaStatement::Write(xva_operand, xva_register) => todo!("write"),
+            XvaStatement::Jump(symbol) => {
+                Instruction::new(Opcode::new(X86Opcode::Jump), vec![Operand::RelSymbol(RelocSym { sym: *symbol, kind: AddressKind::Default }, None)])
+            },
+            XvaStatement::Tailcall { dest, .. } => {
+                let mut oprs = Vec::with_capacity(1);
+                match *dest {
+                    crate::xva::XvaOperand::Register(reg) => {
+                        let XvaRegister::Physical(reg) = reg else {
+                            panic!("Virtual Register during mce")
+                        };
+                        oprs.push(Operand::Register(reg))
+                    },
+                    crate::xva::XvaOperand::Const(xva_const) => {
+                        oprs.push(xva_const.to_direct_rel(AddressKind::Default, AddressKind::Plt));
+                    },
+                    crate::xva::XvaOperand::FrameAddr(_) => unreachable!("Cannot call the stack"),
+                }
+                Instruction::new(Opcode::new(X86Opcode::Jump), oprs)
+            },
+            XvaStatement::Call { dest, .. } => {
+                let mut oprs = Vec::with_capacity(1);
+                match *dest {
+                    crate::xva::XvaOperand::Register(reg) => {
+                        let XvaRegister::Physical(reg) = reg else {
+                            panic!("Virtual Register during mce")
+                        };
+                        oprs.push(Operand::Register(reg))
+                    },
+                    crate::xva::XvaOperand::Const(xva_const) => {
+                        oprs.push(xva_const.to_direct_rel(AddressKind::Default, AddressKind::Plt));
+                    },
+                    crate::xva::XvaOperand::FrameAddr(_) => unreachable!("Cannot call the stack"),
+                }
+
+                Instruction::new(Opcode::new(X86Opcode::Call), oprs)
+            },
+            XvaStatement::Return => {
+                Instruction::new_nullary(X86Opcode::Ret)
+            }
+            XvaStatement::Trap(_) => Instruction::new_nullary(X86Opcode::Ud2),
+            XvaStatement::Noop(_) => todo!("special noop"),
+
+            _ => unreachable!()
+        };
+
+        *stmt = XvaStatement::RawInstr(instr);
+    }
+
+    fn lower_epilogue(&self, frame: crate::xva::XvaFrameProperties, mode: X86Mode) -> Vec<XvaStatement> {
+        let mode_gpr = mode.largest_gpr();
+        let sp = GprName::sp.as_reg(mode_gpr);
+        let mut epilogue = Vec::new();
+        if frame.use_frame_pointer {
+            let bp = GprName::bp.as_reg(mode_gpr);
+            epilogue.push(XvaStatement::RawInstr(Instruction::new(Opcode::new(X86Opcode::Mov), vec![Operand::Register(Register::new(sp)), Operand::Register(Register::new(bp))])));
+            epilogue.push(XvaStatement::RawInstr(Instruction::new(Opcode::new(X86Opcode::Pop), vec![Operand::Register(Register::new(bp))])));
+        } else if frame.has_prologue {
+            let size = frame.frame_size;
+            epilogue.push(XvaStatement::RawInstr(Instruction::new(Opcode::new(X86Opcode::Add), vec![Operand::Register(Register::new(sp)), Operand::Immediate(size as u128)])));
+        }
+        epilogue
+    }
+
+    fn emit_prologue(&self, frame: &mut crate::xva::XvaFrameProperties, mode: X86Mode) -> Vec<Instruction> {
+        let mode_gpr = mode.largest_gpr();
+        let sp = GprName::sp.as_reg(mode_gpr);
+        
+        let mut used_size = 0;
+        let mut align_frame = false;
+        if frame.call_align < frame.frame_align {
+            frame.use_frame_pointer = true;
+            align_frame = true;
+        }
+        let mut instrs = Vec::new();
+        if frame.use_frame_pointer {
+            let bp = GprName::bp.as_reg(mode_gpr);
+            let fptr_size = mode_gpr.size() as usize;
+            frame.frame_size += fptr_size;
+            used_size += 8;
+            instrs.push(Instruction::new(Opcode::new(X86Opcode::Push), vec![Operand::Register(Register::new(bp))]));
+            instrs.push(Instruction::new(Opcode::new(X86Opcode::Mov), vec![Operand::Register(Register::new(bp)), Operand::Register(Register::new(sp))]));
+        }
+
+        let mut align_offset = frame.call_align_offset;
+
+        if align_frame {
+            let align = !(frame.frame_align - 1) as u32;
+            instrs.push(Instruction::new(Opcode::new(X86Opcode::And), vec![Operand::Register(Register::new(sp)), Operand::Immediate(align as u128)]));
+
+            align_offset = 0;
+        }
+        let total_size = frame.frame_size + align_offset;
+
+        let disp = total_size & (frame.frame_align - 1);
+
+        if disp != 0 {
+            frame.frame_size += frame.frame_align - disp;
+        }
+
+        let sub_size = frame.frame_size - used_size;
+
+        if sub_size > 0 {
+            instrs.push(Instruction::new(Opcode::new(X86Opcode::Sub), vec![Operand::Register(Register::new(sp)), Operand::Immediate(sub_size as u128)]));
+        }
+        
+        frame.has_prologue = !instrs.is_empty();
+
+        instrs
     }
 }

@@ -13,6 +13,19 @@ use crate::{
 };
 
 #[derive(Default)]
+pub struct NoState;
+
+impl State for NoState {
+    fn reset_registers(&mut self) {}
+
+    fn mark_has_value(&mut self, reg: XvaRegister) {}
+
+    fn push_gate(&mut self, ty: BarrierKind, num: u32) {}
+
+    fn pop_gate(&mut self, num: u32) {}
+}
+
+#[derive(Default)]
 pub struct PassState {
     pub live_register_values: HashMap<XvaRegister, LiveValue>,
     pub opt_gate_state: Vec<(u32, BarrierKind)>,
@@ -249,7 +262,7 @@ impl XvaStatementOpt for FoldRegisterPass {
                 }
             }
             crate::xva::XvaStatement::Return => {}
-            crate::xva::XvaStatement::Trap(xva_trap) => {
+            crate::xva::XvaStatement::Trap(_) => {
                 if state.test_barrier(BarrierKind::ELIDE_STORE) {
                     state.reset_registers();
                 }
@@ -286,7 +299,7 @@ impl XvaStatementOpt for FoldRegisterPass {
                 }
                 _ => {}
             },
-            XvaStatement::Fallthrough => {}
+            XvaStatement::Fallthrough(_) => {}
         }
     }
 }
@@ -433,7 +446,7 @@ impl RemoveUnused {
                 }
                 _ => {}
             },
-            XvaStatement::Fallthrough => {}
+            XvaStatement::Fallthrough(_) => {}
         }
     }
 
@@ -488,6 +501,47 @@ impl XvaFunctionOpt for RemoveUnused {
                         self.remove_phase(state, stmt);
                     }
                 }
+            }
+        }
+    }
+}
+
+pub struct OptimizeFallthrough;
+
+impl XvaOpt for OptimizeFallthrough {
+    fn phases(&self) -> &[XvaOptPhase] {
+        &[XvaOptPhase::AfterLower]
+    }
+
+    fn cost(&self) -> usize {
+        5
+    }
+
+    fn make_state(&self) -> Box<dyn State> {
+        Box::new(NoState)
+    }
+}
+
+impl XvaFunctionOpt for OptimizeFallthrough {
+    fn optimize_function(&self, _: &mut dyn State, func: &mut xva::XvaFunction, _: XvaOptPhase) {
+        let mut labels = Vec::new();
+        for bb in &func.body {
+            labels.push(bb.label);
+        }
+
+        for (i, bb) in func.body.iter_mut().enumerate() {
+            match &mut bb.body {
+                xva::XvaBlockBody::Statement(stmts) => match stmts.last_mut() {
+                    Some(XvaStatement::Jump(jmp)) => {
+                        if let Some(v) = labels.get(i + 1) {
+                            if v == jmp {
+                                *stmts.last_mut().unwrap() = XvaStatement::Fallthrough(*jmp);
+                            }
+                        }
+                    }
+                    _ => {}
+                },
+                _ => {}
             }
         }
     }

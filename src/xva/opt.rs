@@ -80,9 +80,13 @@ impl<X: XvaStatementOpt> XvaBasicBlockOpt for X {
 
 pub mod pass;
 
-pub const ALL_PASSES: &[&dyn XvaFunctionOpt] = &[&pass::FoldRegisterPass, &pass::RemoveUnused];
+pub const ALL_PASSES: &[&dyn XvaFunctionOpt] = &[
+    &pass::OptimizeFallthrough,
+    &pass::FoldRegisterPass,
+    &pass::RemoveUnused,
+];
 
-fn flatten_statements(dest: &mut Vec<XvaStatement>, stmts: Vec<XvaStatement>) {
+pub(crate) fn flatten_statements(dest: &mut Vec<XvaStatement>, stmts: Vec<XvaStatement>) {
     for stmt in stmts {
         match stmt {
             XvaStatement::Elaborated(stmts) => flatten_statements(dest, stmts),

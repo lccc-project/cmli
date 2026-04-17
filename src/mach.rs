@@ -44,7 +44,7 @@ pub trait MachineSpec: Sized {
     const OPCODES: &[Opcode];
     type Register: RegisterSpec<MachineMode = Self::MachineMode>;
     const REGISTERS: &[Register];
-    type MachineMode: AsId<MachineMode> + Name;
+    type MachineMode: AsId<MachineMode> + Name + Copy;
     const MACH_MODES: &[MachineMode];
 
     type Compiler: CompilerSpec<Machine = Self>;

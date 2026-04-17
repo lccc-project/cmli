@@ -1,6 +1,9 @@
 #[doc(hidden)]
 pub use cmli_proc_macro::rand_u64;
 
+#[doc(hidden)]
+pub use core::num::NonZero as __NonZero;
+
 #[macro_export]
 macro_rules! as_id_array {
     ($base:expr => $id_ty:ty) => {
@@ -10,7 +13,7 @@ macro_rules! as_id_array {
             ) -> [$id_ty; N] {
                 let mut x = [const {
                     <$id_ty>::from_raw_parts(
-                        unsafe { ::core::num::NonZeroU64::new_unchecked(1) },
+                        unsafe {$crate::macros::__NonZero::new_unchecked(1u64) },
                         0,
                     )
                 }; N];
@@ -27,4 +30,19 @@ macro_rules! as_id_array {
             &array_as_id($base)
         }
     };
+}
+
+#[macro_export]
+macro_rules! nzlit {
+    ($lit:expr) => {
+        const {
+            let __val = $lit;
+
+            if __val == 0 {
+                panic!("Zero constant produced when non-zero value is expected");
+            }
+
+            unsafe { $crate::macros::__NonZero::new_unchecked(__val)}
+        }
+    }
 }

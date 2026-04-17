@@ -1,10 +1,7 @@
 use std::{collections::HashSet, num::NonZeroU64};
 
 use crate::{
-    mach::{Machine, MachineMode, MachineSpec, Register, RegisterSpec},
-    target::{PropertyValue, TargetInfo, TargetProperties},
-    traits::{AsId, IdType, Name},
-    xva::XvaCategory,
+    instr::Instruction, mach::{Machine, MachineMode, MachineSpec, Register, RegisterSpec}, target::{PropertyValue, TargetInfo, TargetProperties}, traits::{AsId, IdType, Name}, xva::{NoopKind, XvaCategory, XvaFrameProperties, XvaStatement}
 };
 
 pub trait CompilerSpec: MachineSpec {
@@ -29,6 +26,11 @@ pub trait CompilerSpec: MachineSpec {
         cat: XvaCategory,
         size: u32,
     ) -> Option<u32>;
+
+    fn lower_mce(&self, stmt: &mut XvaStatement, mode: Self::MachineMode);
+
+    fn lower_epilogue(&self, frame: XvaFrameProperties, mode: Self::MachineMode) -> Vec<XvaStatement>;
+    fn emit_prologue(&self, frame: &mut XvaFrameProperties, mode: Self::MachineMode) -> Vec<Instruction>;
 }
 
 pub struct CompilerContext {
@@ -65,6 +67,10 @@ pub trait Compiler {
         cat: XvaCategory,
         size: u32,
     ) -> Option<u32>;
+
+    fn mce_lower(&self, xva: &mut XvaStatement, frame: &XvaFrameProperties, mode: MachineMode);
+
+    fn emit_prologue(&self, frame: &mut XvaFrameProperties, mode: MachineMode) -> Vec<Instruction>;
 }
 
 impl<C: CompilerSpec> Compiler for C {
@@ -106,5 +112,50 @@ impl<C: CompilerSpec> Compiler for C {
             cat,
             size,
         )
+    }
+
+    fn mce_lower(&self, xva: &mut XvaStatement, frame: &XvaFrameProperties, mode: MachineMode) {
+        let mmode = mode.downcast::<<C as MachineSpec>::MachineMode>().unwrap();
+        match xva {
+            XvaStatement::Elaborated(stmts) => {
+                for stmt in stmts {
+                    self.mce_lower(stmt, frame, mode);
+                }
+            },
+            XvaStatement::Noop(NoopKind::Normal) => {}
+
+            XvaStatement::RawInstr(_) |
+            XvaStatement::OptGate(_, _) |
+             XvaStatement::Use(_, _) |
+            XvaStatement::EndOptGate(_) => {},
+            XvaStatement::Fallthrough(_) => {
+                *xva = XvaStatement::Elaborated(vec![])
+            },
+
+            XvaStatement::Return | XvaStatement::Tailcall { .. } => {
+                let mut stmts = if frame.has_prologue { 
+                    self.lower_epilogue(*frame, mmode) 
+                } else {
+                    Vec::new()
+                };
+
+                self.lower_mce(xva, mmode);
+
+                stmts.push(core::mem::take(xva));
+
+                *xva = XvaStatement::Elaborated(stmts);
+            }
+
+            
+
+            stmt => {
+                self.lower_mce(stmt, mmode);
+            }
+        }
+    }
+
+    fn emit_prologue(&self, frame: &mut XvaFrameProperties, mode: MachineMode) -> Vec<Instruction> {
+        let mmode = mode.downcast::<<C as MachineSpec>::MachineMode>().unwrap();
+        <Self as CompilerSpec>::emit_prologue(self, frame, mmode)
     }
 }
