@@ -1,25 +1,37 @@
+//! # x86 Support
+//! 
+//! x86 is supported in 16-bit, 32-bit, and 64-bit mode.
+
+
+
 use crate::{
     compiler::CompilerSpec, instr::{AddressKind, Instruction, Operand, RelocSym}, mach::{MachineMode, MachineSpec, Opcode, Register, RegisterSpec}, traits::{AsId, AsRawId, IdType, Name}, xva::{BinaryOp, XvaCategory, XvaExpr, XvaOpcode, XvaRegister, XvaStatement}
 };
 
 use crate::instr::RegisterKind;
 
+/// The machine mode for X86.
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, AsRawId, Name)]
 pub enum X86Mode {
+    /// 16-bit real mode
     Real,
+    /// 16-bit protected mode. This differs from [`X86Mode::Real`] in that certain registers are only available in this mode
     Protected16,
+    /// 32-bit protected mode
     Protected,
+    /// 64-bit long mode
     Long,
 }
 
 impl X86Mode {
-    pub const ALL_MODES: [X86Mode; 4] = [
+    const ALL_MODES: [X86Mode; 4] = [
         X86Mode::Real,
         X86Mode::Protected16,
         X86Mode::Protected,
         X86Mode::Long,
     ];
 
+    /// Largest supported [`GprSize`] in the current mode
     pub fn largest_gpr(&self) -> GprSize {
         match self {
             X86Mode::Real => GprSize::Word,
@@ -29,6 +41,7 @@ impl X86Mode {
         }
     }
 
+    /// Convenience function for determining if the current mode supports relative addresses in ModR/M bytes. This is only true on [`X86Mode::Long`]
     pub fn supports_rel_addr(&self) -> bool {
         matches!(self, X86Mode::Long)
     }
@@ -68,18 +81,18 @@ macro_rules! def_from_name_arms {
 
 macro_rules! define_x86_registers {
     {
+        $(#[$meta:meta])*
         $vis:vis enum $name:ident ($class_enum:ident) {
-            $($class:ident $(#[norex] $(@ $_norex_tt:tt)?)? [ $($names:ident),* $(, #$prefix:ident _ $($suffix:ident)? $begin:literal..$end:literal)?]  $(($size:literal))? @ $category:ident $(($($cat_tt:tt)*))? $(overlaps [$($overlap_var:ident),*])? = $kind:expr),* $(,)?
+            $($(#[$var_meta:meta])* $class:ident $(#[norex] $(@ $_norex_tt:tt)?)? [ $($names:ident),* $(, #$prefix:ident _ $($suffix:ident)? $begin:literal..$end:literal)?]  $(($size:literal))? @ $category:ident $(($($cat_tt:tt)*))? $(overlaps [$($overlap_var:ident),*])? = $kind:expr),* $(,)?
         }
     } => {
         #[derive(Copy, Clone, Hash, PartialEq, Eq, AsRawId)]
         #[repr(u8)]
         #[non_exhaustive]
+        $(#[$meta])*
         $vis enum $name {
-            $($class (u8)),*
+            $($(#[$var_meta])* $class (u8)),*
         }
-
-
 
         const _: () = {
             #[repr(C)]
@@ -111,16 +124,17 @@ macro_rules! define_x86_registers {
             }
 
             impl $name {
-                $vis const ALL_REGISTERS: [$name; __TOTAL_COUNT] = __concat(__Concat(
+                const ALL_REGISTERS: [$name; __TOTAL_COUNT] = __concat(__Concat(
                     $(__make_array::<{ __count_by_class($name :: $class (0)) }, { $class_enum :: $class}>()),*)
                 );
             }
         };
 
+        $(#[$meta])*
         #[derive(Copy, Clone, Hash, PartialEq, Eq, core::marker::ConstParamTy)]
         #[non_exhaustive]
         $vis enum $class_enum {
-            $($class),*
+            $($(#[$var_meta])* $class),*
         }
 
 
@@ -145,11 +159,13 @@ macro_rules! define_x86_registers {
                 }
             }
 
+            /// Converts the register from the specified name
             #[inline]
             pub fn from_name(name: &str) -> Self {
                 Self::from_name_impl(name)
             }
 
+            /// Obtains the class corresponding to the register
             pub const fn class(&self) -> $class_enum {
                 match self {
                     $(Self:: $class(_) => $class_enum :: $class),*
@@ -210,12 +226,14 @@ macro_rules! define_x86_registers {
                 }
             }
 
+            /// Extracts the register number for the register
             pub const fn regno(&self) -> u8 {
                 match self {
                     $(Self::$class(__n) => *__n $(& 7 $(@ $_norex_tt)?)?),*
                 }
             }
 
+            /// Extracts the category of the register class
             pub const fn category(&self) -> crate::xva::XvaCategory {
                 match self {
                     $(Self::$class(_) => crate::xva::XvaCategory:: $category $(($($cat_tt)*))?,)*
@@ -226,38 +244,69 @@ macro_rules! define_x86_registers {
 }
 
 define_x86_registers! {
+    /// X86 Registers
     pub enum X86Register (X86RegisterClass) {
+        /// Byte Type registers
+        /// This only supports the first 4 registers of this kind and unifies [`X86RegisterClass::ByteLegacy`] and [`X86RegisterClass::ByteRex`] for these register types
         Byte [al, cl, dl, bl] (1) @ Int = RegisterKind::GeneralPurpose,
+        /// Legacy Byte Registers. These access the low bytes (0..4) or high bytes (4..8) of ax, cx, dx, and bx.
+        /// They cannot access sp, bp, si, or di, or any extended (Long Mode or apx) GPR
+        /// Due to encoding characteristics, the high byte registers cannot be used in any instruction that uses a REX, REX2, or Extended EVEX prefix of any kind
         ByteLegacy #[norex][al, cl, dl, bl, ah, ch, dh, bh] (1) @ Int = RegisterKind::GeneralPurpose,
+        /// REX Promoted Byte Registers. These access the low bytes of the corresponding register.
+        /// These are only accessible in [`X86Mode::Long`]
         ByteRex[al, cl, dl, bl, spl, bpl, sil, dil, #r _ b 8..32] (1) @ Int overlaps [Word, Double, Quad] = RegisterKind::GeneralPurpose,
+        /// Word registers. These access the lower 2 bytes of the full gpr
         Word[ax, cx, dx, bx, sp, bp, si, di, #r _ w 8..32] (2) @ Int overlaps [ByteRex, Double, Quad] = RegisterKind::GeneralPurpose,
+        /// Doubleword registers. These access the lower 4 bytes of the full gpr. These are not accessible on [`X86Mode::Real`] (but are in [`X86Mode::Protected16`])
         Double[eax, ecx, edx, ebx, esp, ebp, esi, edi, #r _ d 8..32] (4) @ Int overlaps [ByteRex, Word, Quad] = RegisterKind::GeneralPurpose,
+        /// Quadword registers. These access the full GPR. These are only accesible in [`X86Mode::Long`]
         Quad [rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, #r _ 8..32] (8) @ Int overlaps [ByteRex, Word, Double] = RegisterKind::GeneralPurpose,
+        /// Segment Registers. 
         Segment #[norex] [es, cs, ss, ds, fs, gs] (2) @ Custom(RegisterKind::AddressSegment) = RegisterKind::AddressSegment,
+        /// Floating point stack registers. Note that these correspond to the synthetic registers exposed by fcw.TOP. There is no correspondance for the real fp registers as fp registers
         St [, #st _ 0..8] (10) @ Float = RegisterKind::ScalarFp,
+        /// MMX Technology Registers. 
         Mmx #[norex] [, #mm _ 0..8] (8) @ VectorInt = RegisterKind::VectorInt,
+        /// SSE 16-byte xmm registers
         Xmm [, #xmm _ 0..32] (16) @ VectorAny overlaps [Ymm, Zmm] = RegisterKind::VectorAny,
+        /// AVX 32-byte ymm registers
         Ymm [, #ymm _ 0..32] (32) @ VectorAny overlaps [Xmm, Zmm] = RegisterKind::VectorAny,
+        /// AVX-512/AVX10 64-byte zmm registers
         Zmm [, #zmm _ 0..32] (64) @ VectorAny overlaps [Xmm, Ymm] = RegisterKind::VectorAny,
+        /// AMX Tile Registers
         Tmm [, #tmm _ 0..32] (1024) @ VectorAny = RegisterKind::VectorAny,
+        /// AVX-512/AVX10 mask registers
         Kreg [, #k _ 0..32] (8) @ VectorInt = RegisterKind::VectorBit,
+        /// Control Registers. These require a privileged (kernel) context to access
         Control [, #cr _ 0..32] @ Custom(RegisterKind::System) = RegisterKind::System,
+        /// Debug Registers. These require a privileged (kernel) context to access
         Debug [, #dr _ 0..32] @ Custom(RegisterKind::System) = RegisterKind::System,
+        /// Extended (XSAVE) Control Registers. These can be read in any mode (provided the feature is available) but can only be written in privileged code
         ExtControl [, #xcr _ 0..32] (8) @ Custom(RegisterKind::System) = RegisterKind::System,
+        /// Synthetic register group for the 3 system registers maintained by x87 (fcw: Floating-point Control Word, fsw: Floating-point Status word, and ftw: Floating-point Tag Word)
         X87SysReg [fcw, fsw, ftw] (2) @ Custom(RegisterKind::System) = RegisterKind::System,
+        /// Synthetic register group for the mxcsr register
         SseSysReg [mxcsr] (4) @ Custom(RegisterKind::System) = RegisterKind::System,
     }
 }
 
+/// Type that describes the supported sizes of general purpose registers
+/// [`GprSize`] can be used to convert general purpose registers between the four possibly [`GprSize`]s or to obtain one of the first 8 GPRs
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum GprSize {
+    /// Byte (8-bit) register size
     Byte,
+    /// Word (16-bit) register size
     Word,
+    /// Doubleword (32-bit) register size
     Double,
+    /// Quadword (64-bit) register size
     Quad,
 }
 
 impl GprSize {
+    /// The size, in bytes, of the [`GprSize`]
     pub const fn size(self) -> u32 {
         match self {
             Self::Byte => 1,
@@ -267,6 +316,10 @@ impl GprSize {
         }
     }
 
+    /// Creates a [`GprSize`] from a valid size
+    /// 
+    /// ## Panics
+    /// Panics if the size is not a power of 2 less than or equal to 8
     pub const fn from_size(val: u32) -> Self {
         match val.next_power_of_two() {
             1 => Self::Byte,
@@ -277,6 +330,7 @@ impl GprSize {
         }
     }
 
+    /// Obtains the width (in bits) of the [`GprSize`].
     pub const fn bits(self) -> u32 {
         match self {
             Self::Byte => 8,
@@ -287,25 +341,37 @@ impl GprSize {
     }
 }
 
+/// Helper enum for creating general purpose registers
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum GprName {
+    /// The `rAX` register
     ax,
+    /// The `rCX` register
     cx,
+    /// The `rDX` register
     dx,
+    /// The `rBX` register
     bx,
+    /// The `rSP` register
     sp,
+    /// The `rBP` register
     bp,
+    /// The `rSI` register
     si,
+    /// The `rDI` register
     di
 }
 
 impl GprName {
+    /// Converts to the corresponding [`X86Register`] given the [`GprSize`]
+    /// 
+    /// [`sp`][GprName::sp], [`bp`][GprName::bp], [`si`][GprName::si], and [`di`][GprName::di] are only accessible as [`GprSize::Byte`] in [`X86Mode::Long`]
     pub const fn as_reg(self, size: GprSize) -> X86Register {
         let regno = self as u8;
         match size {
             GprSize::Byte => {
-                if regno < 3 {
+                if regno < 4 {
                     X86Register::Byte(regno)
                 } else {
                     X86Register::ByteRex(regno)
@@ -318,14 +384,24 @@ impl GprName {
     }
 }
 
+/// The size of an xmm/ymm/zmm register. Allows converting between registers in these classes
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum XmmSize {
+    /// The xmm (16-byte) register size
     Xmm,
+    ///The ymm (32-byte) register size
     Ymm,
+    /// The zmm (64-byte) register size
     Zmm,
 }
 
 impl X86Register {
+    /// Promotes a general purpose register to the specified one given [`GprSize`]
+    /// 
+    /// See [`GprName::as_reg`]
+    /// 
+    /// ## Panics
+    /// Panics if `*self` is not a General Purpose Register
     pub const fn promote_gpr(&self, new_size: GprSize) -> X86Register {
         match (self, new_size) {
             (Self::ByteLegacy(n), GprSize::Byte) if *n < 4 => Self::Byte(*n),
@@ -359,6 +435,7 @@ impl X86Register {
         }
     }
 
+    /// Obtains the [`GprSize`] of the current register, if it is a GPR, or returns [`None`] otherwise.
     pub const fn gpr_size(&self) -> Option<GprSize> {
         match self {
             Self::Byte(_) | Self::ByteRex(_) => Some(GprSize::Byte),
@@ -368,7 +445,11 @@ impl X86Register {
             _ => None,
         }
     }
-
+    
+    /// Promotes Xmm/Ymm/Zmm registers to the specified [`XmmSize`]. 
+    /// 
+    /// ## Panics
+    /// Panics if `*self` is not an `xmm`, `ymm`, or `zmm` register
     pub const fn promote_xmm(&self, new_size: XmmSize) -> X86Register {
         match (self, new_size) {
             (Self::Xmm(n) | Self::Ymm(n) | Self::Zmm(n), XmmSize::Xmm) => Self::Xmm(*n),
@@ -378,6 +459,7 @@ impl X86Register {
         }
     }
 
+    /// Obtains the [`XmmSize`] of the current register, if it is a xmm/ymm/zmm register, or returns [`None`] otherwise.
     pub const fn xmm_size(&self) -> Option<XmmSize> {
         match self {
             Self::Xmm(_) => Some(XmmSize::Xmm),
@@ -387,6 +469,7 @@ impl X86Register {
         }
     }
 
+    /// Determines if the `*self` is usable in the specified [`X86Mode`]. 
     pub const fn valid_in_mode(&self, mode: X86Mode) -> bool {
         let is_64_bit = matches!(mode, X86Mode::Long);
         let allow_protection = !matches!(mode, X86Mode::Real); // No 
@@ -407,6 +490,7 @@ impl X86Register {
                 false
             }
             X86Register::Quad(_) if !is_64_bit => false,
+            X86Register::ByteRex(_) => false,
             _ => true,
         }
     }
@@ -495,6 +579,8 @@ impl RegisterSpec for X86Register {
     }
 }
 
+/// Expands to a constant array of [`X86Register`]s with the specified name
+/// Fails to compile if any register is invalid
 #[macro_export]
 macro_rules! x86_registers {
     [$($reg:ident),* $(,)?] => {
@@ -502,6 +588,8 @@ macro_rules! x86_registers {
     }
 }
 
+/// Expands to a constant [`X86Register`] with the specified name.
+/// Fails to compile if the register is invalid
 #[macro_export]
 macro_rules! x86_register {
     [$reg:ident] => {
@@ -509,32 +597,47 @@ macro_rules! x86_register {
     }
 }
 
+/// Enum for the kind of opcodes. Useful for Encoding
 
 pub enum X86OperandKind {
+    /// Register operand with the specified class
     Register(X86RegisterClass),
+    /// Immediate operand
     Immediate,
+    /// Memory operand with the specified data size
     Memory(X86RegisterClass),
+    /// Relative Address
     RelAddr,
 }
 
 macro_rules! x86_instructions {
     {
+        $(#[$meta:meta])*
         $vis:vis enum $name:ident {
-            $(#[prefix] $prefix_name:ident ($prefix_mnemonic:literal) = $prefix_opcode:literal;)*
-            $($instr_name:ident ($mnemonic:literal) {
+            $(!prefix $(#[$prefix_meta:meta])* $prefix_name:ident ($prefix_mnemonic:literal) = $prefix_opcode:literal;)*
+            $($(#[$instr_meta:meta])*  $instr_name:ident ($mnemonic:literal) {
                 $([$($frag:tt @ $operand:pat),* $(,)?] $($mode:pat)? => $opcode:literal $(+ $regno:expr)?),+ $(,)?
             })*
         }
     } => {
 
         #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, AsRawId)]
+        $(#[$meta])*
         $vis enum $name {
-            $($prefix_name,)*
-            $($instr_name),*
+            $(
+                #[doc = ::core::concat!("The `", $prefix_mnemonic, "` prefix")]    
+                $(#[$prefix_meta])* 
+                $prefix_name,
+            )*
+            $(
+                #[doc = ::core::concat!("The `", $mnemonic, "` instruction")]  
+                $(#[$instr_meta])* 
+                $instr_name
+            ),*
         }
 
         impl $name {
-            pub const ALL_OPCODES: [Self; ${count($instr_name)} + ${count($prefix_name)}] = [$(Self::$prefix_name,)* $(Self::$instr_name),*];
+            const ALL_OPCODES: [Self; ${count($instr_name)} + ${count($prefix_name)}] = [$(Self::$prefix_name,)* $(Self::$instr_name),*];
         }
 
         impl const $crate::traits::AsId<$crate::mach::Opcode> for $name {}
@@ -552,14 +655,22 @@ macro_rules! x86_instructions {
 }
 
 x86_instructions! {
+    /// All X86 Opcodes.
     pub enum X86Opcode {
-        #[prefix] Lock ("lock") = 0xF0;
-        #[prefix] AddrOverride ("addro") = 0x67;
-        #[prefix] DataOverride ("datao") = 0x66;
-        #[prefix] Repnz ("repnz") = 0xF2;
-        #[prefix] Repz ("repz") = 0xF3;
-        #[prefix] Rep ("rep") = 0xF3;
-        #[prefix] Wait ("fwait") = 0x9B;
+        !prefix
+        Lock ("lock") = 0xF0;
+        !prefix
+        AddrOverride ("addro") = 0x67;
+        !prefix
+        DataOverride ("datao") = 0x66;
+        !prefix
+        Repnz ("repnz") = 0xF2;
+        !prefix
+        Repz ("repz") = 0xF3;
+        !prefix
+        Rep ("rep") = 0xF3;
+        !prefix
+        Wait ("fwait") = 0x9B;
         Add ("add") {
             [_ @ Memory(X86RegisterClass::Byte) | Register(X86RegisterClass::Byte), _ @ Register(X86RegisterClass::Byte)] => 0x00,
         }
@@ -604,6 +715,7 @@ x86_instructions! {
     }
 }
 
+/// [`Machine`][crate::mach::Machine] and [`Compiler`][crate::compiler::Compiler] for x86
 pub struct X86;
 
 impl MachineSpec for X86 {

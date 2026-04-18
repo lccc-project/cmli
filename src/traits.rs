@@ -166,7 +166,7 @@ mod macros {
     macro_rules! AsRawId {
 
         derive() (#[repr($int:ident)] $(#[$meta:meta])* $vis:vis enum $name:ident {
-            $($var_name:ident ($field:ty) $(= $discrim:expr)?),*
+            $($(#[$var_meta:meta])* $var_name:ident ($field:ty) $(= $discrim:expr)?),*
             $(,)?
         }) => {
             unsafe impl const $crate::traits::AsRawId for $name {
@@ -199,7 +199,7 @@ mod macros {
 
 
         derive() ($(#[$meta:meta])* $vis:vis enum $name:ident {
-            $($var_name:ident $(= $discrim:expr)?),*
+            $($(#[$var_meta:meta])* $var_name:ident $(= $discrim:expr)?),*
             $(,)?
         }) => {
             unsafe impl const $crate::traits::AsRawId for $name {
@@ -286,7 +286,7 @@ mod macros {
         };
 
         derive() ($(#[$meta:meta])* $vis:vis enum $name:ident {
-            $($var_name:ident $( = $discrim:expr)?),*
+            $($(#[$var_meta:meta])* $var_name:ident $( = $discrim:expr)?),*
             $(,)?
         }) => {
             impl $crate::traits::Name for $name{

@@ -1,1 +1,2 @@
-pub trait Parser {}
+//! Assembly Support (stub module)
+

@@ -1,3 +1,4 @@
+//! Compilation support for architectures
 use std::{collections::HashSet, num::NonZeroU64};
 
 use crate::{
