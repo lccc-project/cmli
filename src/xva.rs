@@ -1,7 +1,7 @@
 use std::num::NonZero;
 
 use crate::{
-    compiler::Compiler, fmt::pretty_print_list, instr::{Address, AddressKind, Instruction, MemoryOperand, Operand, RegisterKind, RelocSym}, intern::Symbol, mach::{Machine, MachineMode, Register}, traits::{AsId, IdType as _}, xva
+    compiler::Compiler, fmt::pretty_print_list, instr::{Address, AddressKind, Instruction, MemoryOperand, Operand, RegisterKind, RelocSym}, intern::Symbol, mach::{Machine, MachineMode, Register, Regset}, traits::{AsId, IdType as _}, xva
 };
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -127,13 +127,13 @@ pub enum XvaStatement {
     Jump(Symbol),
     Tailcall {
         dest: XvaOperand,
-        params: Vec<XvaRegister>,
+        params: Regset,
     },
     Call {
         dest: XvaOperand,
-        params: Vec<XvaRegister>,
-        ret_val: Vec<XvaRegister>,
-        call_clobber_regs: Vec<XvaRegister>,
+        params: Regset,
+        ret_val: Regset,
+        call_clobber_regs: Regset,
     },
     Return,
     Trap(XvaTrap),
@@ -165,7 +165,7 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaStatement> {
             XvaStatement::Tailcall { dest, params } => f.write_fmt(format_args!(
                 "tailcall {} ({})",
                 PrettyPrinter(dest, self.1, self.2),
-                pretty_print_list(params, ", ", self.1, self.2),
+                PrettyPrinter(params, self.1, self.2),
             )),
             XvaStatement::Call {
                 dest,
@@ -175,9 +175,9 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaStatement> {
             } => f.write_fmt(format_args!(
                 "call {} ({}) -> {} clobbers [{}]",
                 PrettyPrinter(dest, self.1, self.2),
-                pretty_print_list(params, ", ", self.1, self.2),
-                pretty_print_list(ret_val, ", ", self.1, self.2),
-                pretty_print_list(call_clobber_regs, ", ", self.1, self.2)
+                PrettyPrinter(params, self.1, self.2),
+                PrettyPrinter(ret_val, self.1, self.2),
+                PrettyPrinter(call_clobber_regs, self.1, self.2),
             )),
             XvaStatement::Return => f.write_str("return"),
             XvaStatement::Trap(trap) => f.write_fmt(format_args!("trap {trap}")),
@@ -638,9 +638,10 @@ impl core::fmt::Display for XvaFrameProperties {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct XvaFunction {
-    pub params: Vec<XvaRegister>,
-    pub preserve_regs: Vec<XvaRegister>,
-    pub return_reg: Vec<XvaRegister>,
+    pub params: Regset,
+    pub preserve_regs: Regset,
+    pub clobber_regs: Regset,
+    pub return_regs: Regset,
     pub prologue: Vec<Instruction>,
     pub body: Vec<XvaBasicBlock>,
     pub frame_properties: XvaFrameProperties
@@ -650,37 +651,25 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaFunction> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("PARAMS: ")?;
 
-        let mut sep = "";
-
-        for reg in &self.0.params {
-            f.write_str(sep)?;
-            sep = " ";
-            PrettyPrinter(reg, self.1, self.2).fmt(f)?;
-        }
+        PrettyPrinter(&self.params, self.1, self.2).fmt(f)?;
         f.write_str("\n")?;
 
         f.write_str("PRESERVE REGISTERS: ")?;
 
-        sep = "";
+        PrettyPrinter(&self.preserve_regs, self.1, self.2).fmt(f)?;
+        f.write_str("\n")?;
 
-        for reg in &self.0.preserve_regs {
-            f.write_str(sep)?;
-            sep = " ";
-            PrettyPrinter(reg, self.1, self.2).fmt(f)?;
-        }
+        f.write_str("CLOBBERS REGISTERS: ")?;
+
+
+        PrettyPrinter(&self.clobber_regs, self.1, self.2).fmt(f)?;
         f.write_str("\n")?;
 
         self.frame_properties.fmt(f)?;
 
         f.write_str("RETURN: ")?;
 
-        sep = "";
-
-        for reg in &self.0.return_reg {
-            f.write_str(sep)?;
-            sep = " ";
-            PrettyPrinter(reg, self.1, self.2).fmt(f)?;
-        }
+        PrettyPrinter(&self.return_regs, self.1, self.2).fmt(f)?;
         f.write_str("\n")?;
 
         if self.prologue.len() > 0 {

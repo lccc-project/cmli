@@ -114,7 +114,25 @@ pub const fn hash_string_const(base: u64, v: &str) -> u64 {
 }
 
 pub const trait AsId<T: [const] IdType>: [const] AsRawId {}
-pub const unsafe trait IdType: Copy + core::hash::Hash + Eq {
+
+#[doc(hidden)]
+pub mod __private {
+    pub trait SealedIntoId<T> {}
+}
+
+pub const trait IntoId<T: [const] IdType>: SealedIntoId<T> {
+    fn into_id(self) -> T;
+}
+
+impl<T: IdType, R: AsId<T>> SealedIntoId<T> for R{}
+
+impl<T: [const] IdType, R: [const] AsId<T>> const IntoId<T> for R {
+    fn into_id(self) -> T {
+        T::new(self)
+    }
+}
+
+pub const unsafe trait IdType: Copy + core::hash::Hash + Eq + [const] IntoId<Self> {
     #[doc(hidden)]
     fn into_raw_parts(self) -> (NonZeroU64, u64);
     #[doc(hidden)]
@@ -232,6 +250,18 @@ mod macros {
     #[macro_export]
     macro_rules! IdType {
         derive() ($(#[$meta:meta])* $vis:vis struct $name:ident($nz_ty:ty, u64);) => {
+            impl $crate::traits::__private::SealedIntoId<$name> for $name {}
+            impl const $crate::traits::IntoId<$name> for $name {
+                fn into_id(self) -> $name {
+                    self
+                }
+            }
+            impl $crate::traits::__private::SealedIntoId<$name> for &$name {}
+            impl const $crate::traits::IntoId<$name> for &$name {
+                fn into_id(self) -> $name {
+                    *self
+                }
+            }
             unsafe impl const $crate::traits::IdType for $name {
                 fn into_raw_parts(self) -> (::core::num::NonZeroU64, u64) {
                     (self.0, self.1)
@@ -273,3 +303,5 @@ mod macros {
 }
 
 pub use macros::*;
+
+use crate::traits::__private::SealedIntoId;

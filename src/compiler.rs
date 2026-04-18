@@ -4,6 +4,7 @@ use crate::{
     instr::Instruction, mach::{Machine, MachineMode, MachineSpec, Register, RegisterSpec}, target::{PropertyValue, TargetInfo, TargetProperties}, traits::{AsId, IdType, Name}, xva::{NoopKind, XvaCategory, XvaFrameProperties, XvaStatement}
 };
 
+
 pub trait CompilerSpec: MachineSpec {
     type Machine: MachineSpec<
             Opcode = Self::Opcode,
@@ -31,6 +32,8 @@ pub trait CompilerSpec: MachineSpec {
 
     fn lower_epilogue(&self, frame: XvaFrameProperties, mode: Self::MachineMode) -> Vec<XvaStatement>;
     fn emit_prologue(&self, frame: &mut XvaFrameProperties, mode: Self::MachineMode) -> Vec<Instruction>;
+
+
 }
 
 pub struct CompilerContext {

@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    mach::RegisterSpec,
+    mach::{Machine, MachineMode, RegisterSpec},
     xva::{
         self, BarrierKind, UseKind, XvaConst, XvaExpr, XvaOpcode, XvaOperand, XvaRegister,
         XvaStatement,
@@ -25,10 +25,16 @@ impl State for NoState {
     fn pop_gate(&mut self, num: u32) {}
 }
 
-#[derive(Default)]
 pub struct PassState {
     pub live_register_values: HashMap<XvaRegister, LiveValue>,
     pub opt_gate_state: Vec<(u32, BarrierKind)>,
+    pub mode: MachineMode,
+}
+
+impl PassState {
+    pub fn new(mode: MachineMode) -> Self {
+        Self{live_register_values: HashMap::new(), opt_gate_state: Vec::new(), mode}
+    }
 }
 
 impl PassState {
@@ -112,8 +118,8 @@ impl XvaOpt for FoldRegisterPass {
         &[super::XvaOptPhase::AfterLower, XvaOptPhase::BeforeRegalloc]
     }
 
-    fn make_state(&self) -> Box<dyn State> {
-        Box::new(PassState::default())
+    fn make_state(&self, mode: MachineMode) -> Box<dyn State> {
+        Box::new(PassState::new(mode))
     }
 }
 
@@ -123,6 +129,7 @@ impl XvaStatementOpt for FoldRegisterPass {
         state: &mut dyn State,
         stmt: &mut crate::xva::XvaStatement,
         phase: XvaOptPhase,
+        mach: &dyn Machine,
     ) {
         let state = (state as &mut dyn Any).downcast_mut::<PassState>().unwrap();
         match stmt {
@@ -250,15 +257,15 @@ impl XvaStatementOpt for FoldRegisterPass {
                 ret_val,
                 call_clobber_regs,
             } => {
-                for reg in call_clobber_regs {
+                for reg in call_clobber_regs.into_registers(mach, state.mode) {
                     if state.test_barrier(BarrierKind::ELIDE_STORE) {
-                        state.live_register_values.remove(reg);
+                        state.live_register_values.remove(&XvaRegister::Physical(reg));
                     } else {
-                        state.mark_has_value(*reg); // Clobbered Registers become unknown not uninit if we're in DNO
+                        state.mark_has_value(XvaRegister::Physical(reg)); // Clobbered Registers become unknown not uninit if we're in DNO
                     }
                 }
-                for reg in ret_val {
-                    state.mark_has_value(*reg);
+                for reg in ret_val.into_registers(mach, state.mode) {
+                    state.mark_has_value(XvaRegister::Physical(reg));
                 }
             }
             crate::xva::XvaStatement::Return => {}
@@ -286,7 +293,7 @@ impl XvaStatementOpt for FoldRegisterPass {
             crate::xva::XvaStatement::Noop(_) => {}
             crate::xva::XvaStatement::Elaborated(xva_statements) => {
                 for stmt in xva_statements {
-                    self.optimize_statement(state, stmt, phase);
+                    self.optimize_statement(state, stmt, phase, mach);
                 }
             }
             crate::xva::XvaStatement::Use(regs, kind) => match kind {
@@ -303,12 +310,16 @@ impl XvaStatementOpt for FoldRegisterPass {
         }
     }
 }
-
-#[derive(Default)]
 pub struct RemoveUnusedState {
     pass: PassState,
     used_regs: HashSet<XvaRegister>,
     return_regs: Vec<XvaRegister>,
+}
+
+impl RemoveUnusedState {
+    pub fn new(mode: MachineMode) -> Self {
+        Self{pass: PassState::new(mode), used_regs: HashSet::new(), return_regs: Vec::new()}
+    }
 }
 
 impl State for RemoveUnusedState {
@@ -336,8 +347,8 @@ impl XvaOpt for RemoveUnused {
         15
     }
 
-    fn make_state(&self) -> Box<dyn State> {
-        Box::new(RemoveUnusedState::default())
+    fn make_state(&self, mode: MachineMode) -> Box<dyn State> {
+        Box::new(RemoveUnusedState::new(mode))
     }
 
     fn phases(&self) -> &[XvaOptPhase] {
@@ -387,7 +398,7 @@ impl RemoveUnused {
             }
         }
     }
-    pub fn collect_phase(&self, state: &mut RemoveUnusedState, stmt: &XvaStatement) {
+    pub fn collect_phase(&self, state: &mut RemoveUnusedState, stmt: &XvaStatement, mach: &dyn Machine) {
         match stmt {
             xva::XvaStatement::Expr(xva_expr) => self.collect_expr(state, xva_expr),
             xva::XvaStatement::Write(opr, reg) => {
@@ -398,8 +409,8 @@ impl RemoveUnused {
             xva::XvaStatement::Call { dest, params, .. }
             | xva::XvaStatement::Tailcall { dest, params } => {
                 self.collect_operand(state, *dest);
-                for reg in params {
-                    state.used_regs.insert(*reg);
+                for reg in params.into_registers(mach, state.pass.mode) {
+                    state.used_regs.insert(XvaRegister::Physical(reg));
                 }
             }
             xva::XvaStatement::Return => {
@@ -433,7 +444,7 @@ impl RemoveUnused {
             xva::XvaStatement::Noop(_) => {}
             xva::XvaStatement::Elaborated(xva_statements) => {
                 for stmt in xva_statements {
-                    self.collect_phase(state, stmt);
+                    self.collect_phase(state, stmt, mach);
                 }
             }
             xva::XvaStatement::Use(regs, use_kind) => match use_kind {
@@ -478,24 +489,30 @@ impl XvaFunctionOpt for RemoveUnused {
         state: &mut dyn State,
         func: &mut xva::XvaFunction,
         _: XvaOptPhase,
+        mach: &dyn Machine
     ) {
         let state = (state as &mut dyn Any)
             .downcast_mut::<RemoveUnusedState>()
             .unwrap();
 
-        state.return_regs = func.return_reg.clone();
+        state.return_regs = func.return_regs.into_registers(mach, state.pass.mode).map(XvaRegister::Physical).collect();
 
         for stmt in &mut func.body {
             match &mut stmt.body {
                 xva::XvaBlockBody::Statement(xva_statements) => {
                     for stmt in xva_statements {
-                        self.collect_phase(state, stmt);
+                        self.collect_phase(state, stmt, mach);
                     }
                 }
             }
         }
 
-        func.params.retain(|v| state.used_regs.contains(v));
+        func.params.retain_all(state.used_regs.iter().filter_map(|r| {
+            match r {
+                XvaRegister::Physical(r) => Some(*r),
+                _ => None
+            }
+        }), mach);
 
         for stmt in &mut func.body {
             stmt.live_at_start.retain(|v| state.used_regs.contains(v));
@@ -521,13 +538,13 @@ impl XvaOpt for OptimizeFallthrough {
         5
     }
 
-    fn make_state(&self) -> Box<dyn State> {
+    fn make_state(&self,_ :MachineMode) -> Box<dyn State> {
         Box::new(NoState)
     }
 }
 
 impl XvaFunctionOpt for OptimizeFallthrough {
-    fn optimize_function(&self, _: &mut dyn State, func: &mut xva::XvaFunction, _: XvaOptPhase) {
+    fn optimize_function(&self, _: &mut dyn State, func: &mut xva::XvaFunction, _: XvaOptPhase, _: &dyn Machine) {
         let mut labels = Vec::new();
         for bb in &func.body {
             labels.push(bb.label);

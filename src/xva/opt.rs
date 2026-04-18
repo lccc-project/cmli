@@ -1,6 +1,6 @@
 use std::{any::Any, collections::HashSet};
 
-use crate::xva::{BarrierKind, XvaBasicBlock, XvaFile, XvaFunction, XvaRegister, XvaStatement};
+use crate::{mach::{Machine, MachineMode}, xva::{BarrierKind, XvaBasicBlock, XvaFile, XvaFunction, XvaRegister, XvaStatement}};
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum XvaOptPhase {
@@ -24,11 +24,11 @@ pub trait XvaOpt {
     fn phases(&self) -> &[XvaOptPhase];
     fn cost(&self) -> usize;
 
-    fn make_state(&self) -> Box<dyn State>;
+    fn make_state(&self, mode: MachineMode) -> Box<dyn State>;
 }
 
 pub trait XvaFunctionOpt: XvaOpt {
-    fn optimize_function(&self, state: &mut dyn State, func: &mut XvaFunction, phase: XvaOptPhase);
+    fn optimize_function(&self, state: &mut dyn State, func: &mut XvaFunction, phase: XvaOptPhase, mach: &dyn Machine);
 }
 
 pub trait XvaBasicBlockOpt: XvaOpt {
@@ -37,6 +37,7 @@ pub trait XvaBasicBlockOpt: XvaOpt {
         state: &mut dyn State,
         bb: &mut XvaBasicBlock,
         phase: XvaOptPhase,
+        mach: &dyn Machine,
     );
 }
 
@@ -46,17 +47,18 @@ pub trait XvaStatementOpt: XvaOpt {
         state: &mut dyn State,
         stmt: &mut XvaStatement,
         phase: XvaOptPhase,
+        mach: &dyn Machine,
     );
 }
 
 impl<X: XvaBasicBlockOpt> XvaFunctionOpt for X {
-    fn optimize_function(&self, state: &mut dyn State, func: &mut XvaFunction, phase: XvaOptPhase) {
+    fn optimize_function(&self, state: &mut dyn State, func: &mut XvaFunction, phase: XvaOptPhase, mach: &dyn Machine) {
         for block in &mut func.body {
             state.reset_registers();
             for &live in &block.live_at_start {
                 state.mark_has_value(live);
             }
-            self.optimize_basic_block(state, block, phase);
+            self.optimize_basic_block(state, block, phase, mach);
         }
     }
 }
@@ -67,11 +69,12 @@ impl<X: XvaStatementOpt> XvaBasicBlockOpt for X {
         state: &mut dyn State,
         func: &mut XvaBasicBlock,
         phase: XvaOptPhase,
+        mach: &dyn Machine,
     ) {
         match &mut func.body {
             super::XvaBlockBody::Statement(stmts) => {
                 for stmt in stmts {
-                    self.optimize_statement(state, stmt, phase);
+                    self.optimize_statement(state, stmt, phase, mach);
                 }
             }
         }
@@ -100,6 +103,8 @@ pub fn run_passes<'a>(
     phase: XvaOptPhase,
     prg: &mut XvaFile,
     mut fuel: usize,
+    mach: &dyn Machine,
+    mode: MachineMode,
 ) {
     let mut modified_funcs = HashSet::new();
     for pass in passes {
@@ -112,8 +117,8 @@ pub fn run_passes<'a>(
         fuel -= cost;
         for func in &mut prg.functions {
             modified_funcs.insert(func as *mut _);
-            let mut state = pass.make_state();
-            pass.optimize_function(&mut *state, &mut func.body, phase);
+            let mut state = pass.make_state(mode);
+            pass.optimize_function(&mut *state, &mut func.body, phase, mach);
         }
     }
 

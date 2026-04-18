@@ -1,11 +1,11 @@
 use crate::{
     compiler::CompilerSpec,
-    fmt::PrettyPrinter,
+    fmt::{self, PrettyPrinter},
     instr::{Instruction, RegisterKind},
-    traits::{AsId, IdType, Name},
+    traits::{AsId, IdType, IntoId, Name},
     xva::XvaCategory,
 };
-use std::{hash::Hasher, num::NonZeroU64};
+use std::{hash::Hasher, iter, num::NonZeroU64};
 
 use crate::traits::AsRawId;
 
@@ -285,12 +285,105 @@ const REGSET_SIZE: usize = 4;
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Regset([u64; REGSET_SIZE]);
 
-impl IntoIterator for Regset {
-    type IntoIter = RegSetIter;
-    type Item = RegsetBit;
+impl Regset {
+    pub const fn new() -> Self {
+        Self([0; REGSET_SIZE])
+    }
 
-    fn into_iter(self) -> Self::IntoIter {
-        RegSetIter(self.0.into_iter(), 0, 0)
+    pub fn from_registers<R: IntoId<Register>>(iter: impl IntoIterator<Item = R>, mach: &dyn Machine) -> Self {
+        let mut array = Self::new();
+
+        array.insert_registers(iter, mach);
+
+        array
+    }
+
+    pub const fn insert_bit(&mut self, bit: RegsetBit) {
+        let idx = (bit.0 >> 6) as usize;
+        self.0[idx] |= (1 << (bit.0 & 63));
+    }
+
+    pub fn insert_register<R: IntoId<Register>>(&mut self, reg: R, mach: &dyn Machine) {
+        let reg = reg.into_id();
+
+        let bit = mach.registers().regmap_bit(reg).expect("Cannot push register");
+
+        self.insert_bit(RegsetBit(bit))
+    }
+
+    pub fn insert_registers<R: IntoId<Register>>(&mut self, iter: impl IntoIterator<Item = R>, mach: &dyn Machine) {
+        for reg in iter {
+            self.insert_register(reg, mach);
+        }
+    }
+
+    pub const fn remove_bit(&mut self, bit: RegsetBit) {
+        let idx = (bit.0 >> 6) as usize;
+        self.0[idx] &= !(1 << (bit.0 & 63));
+    }
+
+    pub fn remove_register<R: IntoId<Register>>(&mut self, reg: R, mach: &dyn Machine) {
+        let reg = reg.into_id();
+
+        let bit = mach.registers().regmap_bit(reg).expect("Cannot push register");
+
+        self.remove_bit(RegsetBit(bit))
+    }
+
+    pub fn remove_registers<R: IntoId<Register>>(&mut self, iter: impl IntoIterator<Item = R>, mach: &dyn Machine) {
+        for reg in iter {
+            self.remove_register(reg, mach);
+        }
+    }
+
+    pub const fn contains_bit(&self, bit: RegsetBit) -> bool {
+        let idx = (bit.0 >> 6) as usize;
+
+        (self.0[idx] & (1 << (bit.0 & 63))) != 0
+    }
+
+    pub fn contains_register<R: IntoId<Register>>(&self, reg: R, mach: &dyn Machine) -> bool {
+        let reg = reg.into_id();
+
+        let bit = mach.registers().regmap_bit(reg).expect("Cannot push register");
+
+        self.contains_bit(RegsetBit(bit))
+    }
+
+    pub fn contains_any<R: IntoId<Register>>(&self, reg: impl IntoIterator<Item = R>, mach: &dyn Machine) -> bool {
+        reg.into_iter().any(|r| self.contains_register(r, mach))
+    }
+
+    pub fn contains_all<R: IntoId<Register>>(&self, reg: impl IntoIterator<Item = R>, mach: &dyn Machine) -> bool {
+        reg.into_iter().all(|r| self.contains_register(r, mach))
+    }
+
+    pub fn into_registers<'a>(self, mach: &'a dyn Machine, mode: MachineMode) -> RegsetIntoRegisters<'a> {
+        RegsetIntoRegisters(self.into_iter(), mach.registers(), mode)
+    }
+
+    pub fn retain_all<R: IntoId<Register>>(&mut self, reg: impl IntoIterator<Item = R>, mach: &dyn Machine) {
+        let other = Self::from_registers(reg, mach);
+
+        self.retain_mask(other);
+    }
+
+    pub fn retain_mask(&mut self, other: Regset) {
+        for (a, b) in iter::zip(&mut self.0, other.0) {
+            *a &= b;
+        }
+    }
+
+    pub fn remove_mask(&mut self, other: Regset) {
+        for (a, b) in iter::zip(&mut self.0, other.0) {
+            *a &= !b;
+        }
+    }
+}
+
+impl<'a> core::fmt::Display for PrettyPrinter<'a, Regset> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt::pretty_print_list(*self.0, ", ", self.1, self.2).fmt(f)
     }
 }
 
@@ -305,15 +398,26 @@ impl FromIterator<RegsetBit> for Regset {
 impl Extend<RegsetBit> for Regset {
     fn extend<T: IntoIterator<Item = RegsetBit>>(&mut self, iter: T) {
         for bit in iter {
-            let idx = (bit.0 >> 6) as usize;
-            self.0[idx] |= (1 << (bit.0 & 63));
+            self.insert_bit(bit);
         }
     }
 }
 
-pub struct RegSetIter(core::array::IntoIter<u64, REGSET_SIZE>, u64, u32);
+impl IntoIterator for Regset {
+    type Item = RegsetBit;
+    type IntoIter = RegsetIter;
 
-impl Iterator for RegSetIter {
+    fn into_iter(self) -> Self::IntoIter {
+        let mut iter = self.0.into_iter();
+
+        let val = iter.next().unwrap();
+        RegsetIter(iter, val, 0)
+    }
+}
+
+pub struct RegsetIter(core::array::IntoIter<u64, REGSET_SIZE>, u64, u32);
+
+impl Iterator for RegsetIter {
     type Item = RegsetBit;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -327,12 +431,24 @@ impl Iterator for RegSetIter {
         let val = self.2 + p;
         self.2 += p + 1;
 
-        Some(RegsetBit(self.2))
+        Some(RegsetBit(val))
     }
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct RegsetBit(u32);
+
+pub struct RegsetIntoRegisters<'a>(RegsetIter, &'a dyn Registers, MachineMode);
+
+impl<'a> Iterator for RegsetIntoRegisters<'a> {
+    type Item = Register;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let bit = self.0.next()?;
+
+        self.1.regmap_from_bit(bit.0, self.2)
+    }
+}
 
 impl<'a> core::fmt::Display for PrettyPrinter<'a, RegsetBit> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -245,6 +245,7 @@ define_x86_registers! {
         Debug [, #dr _ 0..32] @ Custom(RegisterKind::System) = RegisterKind::System,
         ExtControl [, #xcr _ 0..32] (8) @ Custom(RegisterKind::System) = RegisterKind::System,
         X87SysReg [fcw, fsw, ftw] (2) @ Custom(RegisterKind::System) = RegisterKind::System,
+        SseSysReg [mxcsr] (4) @ Custom(RegisterKind::System) = RegisterKind::System,
     }
 }
 
@@ -453,20 +454,20 @@ impl RegisterSpec for X86Register {
 
     fn from_bit(bit: u32, mode: Self::MachineMode) -> Option<Self> {
         match bit {
-            n @ 0..32 => match mode {
+            n @ 0..0x20 => match mode {
                 X86Mode::Real | X86Mode::Protected16 => Some(X86Register::Word(n as u8)),
                 X86Mode::Protected => Some(X86Register::Double(n as u8)),
                 X86Mode::Long => Some(X86Register::Quad(n as u8)),
             },
-            n @ 32..64 => Some(X86Register::Xmm((n & 31) as u8)),
-            n @ 64..70 => Some(X86Register::Segment((n & 7) as u8)),
-            n @ 76..80 => Some(X86Register::ByteLegacy((n & 7) as u8)),
-            n @ 80..88 => Some(X86Register::Tmm((n & 7) as u8)),
-            n @ 88..96 => Some(X86Register::Kreg((n & 7) as u8)),
-            n @ 96..104 => Some(X86Register::St((n & 7) as u8)),
-            n @ 0x68..0x6B => Some(X86Register::X87SysReg((n & 7) as u8)),
-
-            n => None,
+            n @ 0x20..0x40 => Some(X86Register::Xmm((n & 31) as u8)),
+            n @ 0x40..0x46 => Some(X86Register::Segment((n & 7) as u8)),
+            n @ 0x48..0x4C => Some(X86Register::ByteLegacy((n & 7) as u8)),
+            n @ 0x50..0x58 => Some(X86Register::Tmm((n & 7) as u8)),
+            n @ 0x58..0x60 => Some(X86Register::Kreg((n & 7) as u8)),
+            n @ 0x60..0x68 => Some(X86Register::St((n & 7) as u8)),
+            n @ 0x68..0x6C => Some(X86Register::X87SysReg((n & 3) as u8)),
+            n @ 0x6C..0x6D => Some(X86Register::SseSysReg((n & 3) as u8)),
+            _ => None,
         }
     }
 
@@ -489,6 +490,7 @@ impl RegisterSpec for X86Register {
             X86Register::Kreg(n) => Some(0x58 | n as u32),
             X86Register::Control(_) | X86Register::Debug(_) | X86Register::ExtControl(_) => None,
             X86Register::X87SysReg(n) => Some(0x68 | n as u32),
+            X86Register::SseSysReg(n) => Some(0x6C | n as u32),
         }
     }
 }
@@ -663,7 +665,9 @@ impl X86 {
                     X86Register::Control(_) |
                     X86Register::Debug(_) |
                     X86Register::ExtControl(_) |
-                    X86Register::X87SysReg(_) => panic!("Cannot support zeroinit of these registers"),
+                    X86Register::X87SysReg(_) |
+                    X86Register::SseSysReg(_)
+                    => panic!("Cannot support zeroinit of these registers"),
                 }
             },
             
@@ -698,7 +702,7 @@ impl X86 {
                     X86Register::Tmm(_) => todo!("tmm"),
                     X86Register::Kreg(_) => todo!("kreg"),
                     X86Register::ExtControl(_) => todo!("xcr"),
-                    X86Register::X87SysReg(_) => panic!("Cannot move to a fsw/fcw/ftw/mxcsr (need to use read)"),
+                    X86Register::X87SysReg(_) | X86Register::SseSysReg(_) => panic!("Cannot move to a fsw/fcw/ftw/mxcsr (need to use read)"),
                 }
             },
             XvaOpcode::ComputeAddr { base, size, index } => todo!(),
