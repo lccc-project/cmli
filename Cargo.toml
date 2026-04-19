@@ -18,6 +18,9 @@ members = ["cmli-proc-macro"]
 [features]
 x86 = []
 
-default = ["default-archs"]
+default = ["default-archs","default-formats"]
 default-archs = ["x86"]
 all-archs = ["default-archs"]
+
+default-formats = []
+all-formats = ["default-formats"]
