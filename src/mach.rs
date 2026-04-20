@@ -1,3 +1,5 @@
+//! Information about machine architectures
+//! The base trait of cmli is [`Machine`] from which all features are derived. This trait is dyn-compatible so it can be type-erased
 use crate::{
     compiler::CompilerSpec,
     fmt::{self, PrettyPrinter},
@@ -9,24 +11,32 @@ use std::{hash::Hasher, iter, num::NonZeroU64};
 
 use crate::traits::AsRawId;
 
+/// Helper [`MachineMode`] type for machines that do not distinguish between operating modes
 #[derive(AsRawId, Copy, Clone, Debug, Hash, PartialEq, Eq, Name)]
 pub enum OneMachine {
+    /// Singleton instance of [`OneMachine`]
     Singleton,
 }
 
 impl const AsId<MachineMode> for OneMachine {}
 
+/// Array of [`MachineMode`] values containing solely [`OneMachine::Singleton`]
 pub const ONE_MACHINE: &[MachineMode] = as_id_array!([OneMachine::Singleton] => MachineMode);
 
+/// Specification trait for providing information about CPU registers
+/// Can be combined with [`MachineSpec`] to implement the [`Registers`] trait
 pub trait RegisterSpec: AsId<Register> + Name + Sized {
+    /// The machine modes supported by this register kind. This should match the corresponding [`MachineSpec`]
     type MachineMode: AsId<MachineMode>;
     /// The Kind of the register
     fn kind(&self) -> RegisterKind;
-    /// The size (in bytes) of the register
+    /// The size (in bytes) of the register in `mode`.
     fn size(&self, mode: Self::MachineMode) -> u32;
 
+    /// Determines the category of the specified register in the current `mode`
     fn category(&self, mode: Self::MachineMode) -> XvaCategory;
 
+    /// Determines the optimistic alignment requirement for the physical register in the current `mode`
     fn align(&self, mode: Self::MachineMode) -> u32 {
         self.size(mode).next_power_of_two()
     }

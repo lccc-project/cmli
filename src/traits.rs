@@ -1,13 +1,18 @@
+//! Traits used by `cmli`
 use std::{
     any::Any,
     hash::Hasher,
     num::{NonZero, NonZeroU64},
 };
 
+/// Identifies types that have a statically known [`Name`]
 pub trait Name {
+    /// Obtains the name of the current value
     fn name(&self) -> &'static str;
 }
 
+/// [`AsRawId`] is provided for types that can be converted into and [`IdType`] (controlled by the [`AsId`] trait)
+/// There is no public interface for this trait, other than requiring [`Sized`] and [`Eq`]. This trait can only be implemented via the [`AsRawId!`] derive macro
 pub const unsafe trait AsRawId: Sized + Eq + 'static {
     #[doc(hidden)]
     const TYPE: NonZeroU64;
@@ -113,18 +118,22 @@ pub const fn hash_string_const(base: u64, v: &str) -> u64 {
     state[0] ^ state[1] ^ state[2] ^ state[3]
 }
 
+/// A subtype of [`AsRawId`] that allows conversion to a specific [`IdType`]. Requires deriving [`AsRawId!`].
 pub const trait AsId<T: [const] IdType>: [const] AsRawId {}
 
 #[doc(hidden)]
 pub mod __private {
-    pub trait SealedIntoId<T> {}
+    pub trait Sealed<T> {}
 }
 
-pub const trait IntoId<T: [const] IdType>: SealedIntoId<T> {
+/// Wrapper trait that allows abstracting types that can be converted into Id form as `T`. Implemented by `T` itself when `T` derives [`IdType`], and by all types that implement [`AsId<T>`].
+/// This trait is sealed and cannot be implemented outside this crate.
+pub const trait IntoId<T: [const] IdType>: Sealed<T> {
+    /// Converts `Self` to `T`
     fn into_id(self) -> T;
 }
 
-impl<T: IdType, R: AsId<T>> SealedIntoId<T> for R{}
+impl<T: IdType, R: AsId<T>> Sealed<T> for R{}
 
 impl<T: [const] IdType, R: [const] AsId<T>> const IntoId<T> for R {
     fn into_id(self) -> T {
@@ -132,16 +141,22 @@ impl<T: [const] IdType, R: [const] AsId<T>> const IntoId<T> for R {
     }
 }
 
+/// And [`IdType`] is a specialized type that conceptually stores two values: A type key, which is a [`NonZeroU64`], and a `u64`
+/// [`IdType`]s can be constructed from types that implement [`AsId<Self>`], and can be (checked) downcast into such types. 
+/// 
+/// This trait is sealed: It can only be implemented via the derive macro [`IdType!`]
 pub const unsafe trait IdType: Copy + core::hash::Hash + Eq + [const] IntoId<Self> {
     #[doc(hidden)]
     fn into_raw_parts(self) -> (NonZeroU64, u64);
     #[doc(hidden)]
     fn from_raw_parts(ty: NonZeroU64, discrim: u64) -> Self;
 
+    /// Constructs a new value of `Self` from a type that can be converted into it
     fn new<T: [const] AsId<Self>>(val: T) -> Self {
         Self::from_raw_parts(T::TYPE, val.into_raw_id())
     }
 
+    /// Performs a checked downcast from `self` to `T`. Returns `None` if the types mismatch, or `Self` stores an erroneous value.
     fn downcast<T: [const] AsId<Self>>(self) -> Option<T> {
         let (ty, discrim) = self.into_raw_parts();
 
@@ -162,6 +177,7 @@ pub const fn raw_id_type(x: u64) -> NonZeroU64 {
 }
 
 mod macros {
+    /// Derive macro for [`AsRawId`][super::AsRawId] currently supports enums with only unit variants, enums with variants that store a small (u32 or smaller) value, and structs that store a single `u64` or smaller
     #[macro_export]
     macro_rules! AsRawId {
 
@@ -247,16 +263,17 @@ mod macros {
 
     pub use AsRawId;
 
+    /// derive macro for [`IdType`][super::IdType]. Presently only supports one form, a struct with two tuple fields
     #[macro_export]
     macro_rules! IdType {
         derive() ($(#[$meta:meta])* $vis:vis struct $name:ident($nz_ty:ty, u64);) => {
-            impl $crate::traits::__private::SealedIntoId<$name> for $name {}
+            impl $crate::traits::__private::Sealed<$name> for $name {}
             impl const $crate::traits::IntoId<$name> for $name {
                 fn into_id(self) -> $name {
                     self
                 }
             }
-            impl $crate::traits::__private::SealedIntoId<$name> for &$name {}
+            impl $crate::traits::__private::Sealed<$name> for &$name {}
             impl const $crate::traits::IntoId<$name> for &$name {
                 fn into_id(self) -> $name {
                     *self
@@ -275,6 +292,7 @@ mod macros {
     }
     pub use IdType;
 
+    /// Derive macro for the [`Name`][super::Name] trait. Supports any struct or enum.
     #[macro_export]
     macro_rules! Name {
         derive() ($(#[$meta:meta])* $vis:vis struct $name:ident $($_rest:tt)*) => {
@@ -286,7 +304,7 @@ mod macros {
         };
 
         derive() ($(#[$meta:meta])* $vis:vis enum $name:ident {
-            $($(#[$var_meta:meta])* $var_name:ident $( = $discrim:expr)?),*
+            $($(#[$var_meta:meta])* $var_name:ident $(($($variant_fields:tt)*))? $({$($struct_fields:tt)*})? $( = $discrim:expr)?),*
             $(,)?
         }) => {
             impl $crate::traits::Name for $name{
@@ -304,4 +322,4 @@ mod macros {
 
 pub use macros::*;
 
-use crate::traits::__private::SealedIntoId;
+use crate::traits::__private::Sealed;
