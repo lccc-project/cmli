@@ -996,7 +996,7 @@ impl CompilerSpec for X86 {
 
                 Instruction::new(Opcode::new(opcode), oprs)
             },
-            XvaStatement::Write(xva_operand, xva_register) => todo!("write"),
+            XvaStatement::Write(xva_operand, ty, xva_register) => todo!("write"),
             XvaStatement::Jump(symbol) => {
                 Instruction::new(Opcode::new(X86Opcode::Jump), vec![Operand::RelSymbol(RelocSym { sym: *symbol, kind: AddressKind::Default }, None)])
             },

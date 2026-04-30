@@ -123,7 +123,7 @@ pub enum XvaBlockBody {
 #[non_exhaustive]
 pub enum XvaStatement {
     Expr(XvaExpr),
-    Write(XvaOperand, XvaRegister),
+    Write(XvaOperand, XvaType, XvaRegister),
     Jump(Symbol),
     Tailcall {
         dest: XvaOperand,
@@ -156,8 +156,8 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaStatement> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             XvaStatement::Expr(expr) => PrettyPrinter(expr, self.1, self.2).fmt(f),
-            XvaStatement::Write(op, reg) => f.write_fmt(format_args!(
-                "write {}, {}",
+            XvaStatement::Write(op, ty, reg) => f.write_fmt(format_args!(
+                "write {ty} [{}], {}",
                 PrettyPrinter(op, self.1, self.2),
                 PrettyPrinter(reg, self.1, self.2)
             )),
@@ -405,6 +405,22 @@ impl core::fmt::Display for UnaryOp {
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum RightShiftMode {
+    Unsigned,
+    Signed,
+}
+
+
+impl core::fmt::Display for RightShiftMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unsigned => f.write_str("unsigned"),
+            Self::Signed => f.write_str("signed"),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -412,7 +428,7 @@ pub enum BinaryOp {
     Or,
     Xor,
     ShiftLeft(ShiftBehaviour),
-    ShiftRight(ShiftBehaviour),
+    ShiftRight(ShiftBehaviour, RightShiftMode),
 }
 
 impl core::fmt::Display for BinaryOp {
@@ -427,8 +443,10 @@ impl core::fmt::Display for BinaryOp {
                 f.write_str("shl ")?;
                 behaviour.fmt(f)
             }
-            Self::ShiftRight(behaviour) => {
+            Self::ShiftRight(behaviour, mode) => {
                 f.write_str("shr ")?;
+                mode.fmt(f)?;
+                f.write_str(" ")?;
                 behaviour.fmt(f)
             }
         }
@@ -593,6 +611,7 @@ pub struct XvaFrameProperties {
     pub call_align_offset: usize,
     pub has_prologue: bool,
     pub use_frame_pointer: bool,
+    pub is_leaf: bool,
 
     #[doc(hidden)]
     pub __non_exhaustive: (),
@@ -601,7 +620,7 @@ pub struct XvaFrameProperties {
 impl XvaFrameProperties {
     pub const fn new() -> Self {
         Self {
-            frame_size: 0, frame_align: 1, call_align: 1, call_align_offset: 0, has_prologue: false, use_frame_pointer: false, __non_exhaustive: ()
+            frame_size: 0, frame_align: 1, call_align: 1, call_align_offset: 0, has_prologue: false, use_frame_pointer: false, is_leaf: false, __non_exhaustive: ()
         }
     }
 }
@@ -630,6 +649,10 @@ impl core::fmt::Display for XvaFrameProperties {
 
         if self.use_frame_pointer {
             f.write_str("FRAME POINTER ")?;
+        }
+
+        if self.is_leaf {
+            f.write_str("LEAF ")?;
         }
 
         f.write_str("\n")

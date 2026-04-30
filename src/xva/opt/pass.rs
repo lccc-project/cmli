@@ -235,7 +235,7 @@ impl XvaStatementOpt for FoldRegisterPass {
                     }
                 }
             }
-            crate::xva::XvaStatement::Write(_, xva_register) => {
+            crate::xva::XvaStatement::Write(_, _,  xva_register) => {
                 if !state
                     .test_barrier(BarrierKind::PROPAGATE_THROUGH | BarrierKind::ELIDE_REGISTERS)
                 {
@@ -401,7 +401,7 @@ impl RemoveUnused {
     pub fn collect_phase(&self, state: &mut RemoveUnusedState, stmt: &XvaStatement, mach: &dyn Machine) {
         match stmt {
             xva::XvaStatement::Expr(xva_expr) => self.collect_expr(state, xva_expr),
-            xva::XvaStatement::Write(opr, reg) => {
+            xva::XvaStatement::Write(opr, _,  reg) => {
                 self.collect_operand(state, *opr);
                 state.used_regs.insert(*reg);
             }

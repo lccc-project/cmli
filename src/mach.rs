@@ -66,6 +66,10 @@ pub trait MachineSpec: Sized {
     fn pretty_print_size(&self, size: usize) -> Option<&'static str> {
         None
     }
+
+    fn pretty_print_instr(&self, instr: Self::Opcode, mode: Self::MachineMode, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        f.write_str(instr.name())
+    }
 }
 
 mod private {
@@ -204,6 +208,12 @@ impl<M: MachineSpec> Machine for M {
             MACH_MODES
         }
     );
+
+    fn pretty_print_instr(&self, opc: Opcode, mode: MachineMode, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        let instr = opc.downcast().expect("Unknown Opcode");
+        let mode = mode.downcast().expect("Unknown Machine Mode");
+        <Self as MachineSpec>::pretty_print_instr(&self, instr, mode, f)
+    }
 }
 
 pub trait Machine {
@@ -214,6 +224,8 @@ pub trait Machine {
     fn pretty_print_size(&self, size: usize) -> Option<&'static str> {
         None
     }
+
+    fn pretty_print_instr(&self, opc: Opcode, mode: MachineMode, f: &mut core::fmt::Formatter) -> core::fmt::Result;
 }
 
 macro_rules! impl_machine_helper {
@@ -268,7 +280,7 @@ pub struct Opcode(NonZeroU64, u64);
 
 impl<'a> core::fmt::Display for PrettyPrinter<'a, Opcode> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.1.opcodes().name_of(*self.0))
+        self.1.pretty_print_instr(*self.0, self.2, f)
     }
 }
 
@@ -290,7 +302,7 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, Register> {
     }
 }
 
-const REGSET_SIZE: usize = 4;
+const REGSET_SIZE: usize = 8;
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Regset([u64; REGSET_SIZE]);

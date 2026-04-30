@@ -121,19 +121,12 @@ pub const fn hash_string_const(base: u64, v: &str) -> u64 {
 /// A subtype of [`AsRawId`] that allows conversion to a specific [`IdType`]. Requires deriving [`AsRawId!`].
 pub const trait AsId<T: [const] IdType>: [const] AsRawId {}
 
-#[doc(hidden)]
-pub mod __private {
-    pub trait Sealed<T> {}
-}
-
 /// Wrapper trait that allows abstracting types that can be converted into Id form as `T`. Implemented by `T` itself when `T` derives [`IdType`], and by all types that implement [`AsId<T>`].
-/// This trait is sealed and cannot be implemented outside this crate.
-pub const trait IntoId<T: [const] IdType>: Sealed<T> {
+pub const trait IntoId<T: [const] IdType> {
     /// Converts `Self` to `T`
     fn into_id(self) -> T;
 }
 
-impl<T: IdType, R: AsId<T>> Sealed<T> for R{}
 
 impl<T: [const] IdType, R: [const] AsId<T>> const IntoId<T> for R {
     fn into_id(self) -> T {
@@ -241,20 +234,23 @@ mod macros {
         };
 
 
-        derive() ($(#[$meta:meta])* $vis:vis struct $name:ident ($field_ty:ty);) => {
-            const _: () {
-                const fn __test::<__T: $crate::traits::TryAsU64Raw>() {}
+        derive() ($(#[$meta:meta])* $vis:vis struct $name:ident ($(#[$field_meta:meta])* $fvis:vis $field_ty:ty);) => {
+            const _: () = {
+                const fn __test<__T: $crate::traits::TryAsU64Raw>() {}
                 __test::<$field_ty>();
             };
             unsafe impl const $crate::traits::AsRawId for $name {
-                const TYPE: ::core::num::NonZeroU64 = $crate::traits::raw_id_type($crate::traits::hash_string_const($crate::macros::rand_u64!(struct $name ($field_ty);), ::core::module_path!(), "::", ::core::stringify!($name),));
+                const TYPE: ::core::num::NonZeroU64 = $crate::traits::raw_id_type($crate::traits::hash_string_const($crate::macros::rand_u64!(struct $name ($field_ty);), ::core::concat!(::core::module_path!(), "::", ::core::stringify!($name),)));
 
                 fn into_raw_id(self) -> u64 {
                     unsafe { $crate::mem::transmute(self.0)}
                 }
 
                 fn from_raw_id(x: u64) -> Option<Self> {
-                    $crate::traits::try_from_u64::<$field_ty>().map($name)
+                    match $crate::traits::try_from_u64::<$field_ty>(x) {
+                        Some(val) => Some(Self(val)),
+                        None => None
+                    }
                 }
             }
         };
@@ -267,13 +263,11 @@ mod macros {
     #[macro_export]
     macro_rules! IdType {
         derive() ($(#[$meta:meta])* $vis:vis struct $name:ident($nz_ty:ty, u64);) => {
-            impl $crate::traits::__private::Sealed<$name> for $name {}
             impl const $crate::traits::IntoId<$name> for $name {
                 fn into_id(self) -> $name {
                     self
                 }
             }
-            impl $crate::traits::__private::Sealed<$name> for &$name {}
             impl const $crate::traits::IntoId<$name> for &$name {
                 fn into_id(self) -> $name {
                     *self
@@ -322,4 +316,60 @@ mod macros {
 
 pub use macros::*;
 
-use crate::traits::__private::Sealed;
+pub const trait BitfieldEncodable {
+    const MAX_WIDTH: u32;
+    fn encode_bits(&self) -> u128;
+    fn decode_bits(val: u128, w: u32) -> Self;
+}
+
+macro_rules! impl_encodable_primitives {
+    ($($uty:ident => $sty:ident),+ $(,)?) => {
+        $(
+            impl const BitfieldEncodable for $uty {
+                const MAX_WIDTH: u32 = $uty::BITS;
+
+                fn encode_bits(&self) -> u128 {
+                    *self as u128
+                }
+
+                fn decode_bits(val: u128, _: u32) -> Self {
+                    val as Self
+                }
+            }
+
+            impl const BitfieldEncodable for $sty {
+                const MAX_WIDTH: u32 = $uty::BITS;
+
+                fn encode_bits(&self) -> u128 {
+                    *self as u128
+                }
+
+                fn decode_bits(val: u128, w: u32) -> Self {
+                    let ex = 0u128.wrapping_sub((val & (1 << (w-1))));
+
+                    (val | ex) as $sty
+                }
+            }
+        )*
+    }
+}
+
+impl_encodable_primitives!{
+    u8 => i8,
+    u16 => i16,
+    u32 => i32,
+    u64 => i64,
+    u128 => i128,
+}
+
+impl const BitfieldEncodable for bool {
+    const MAX_WIDTH: u32 = 1;
+
+    fn decode_bits(val: u128, _: u32) -> Self {
+        val != 0
+    }
+
+    fn encode_bits(&self) -> u128 {
+        *self as u128
+    }
+}

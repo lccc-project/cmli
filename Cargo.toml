@@ -11,16 +11,18 @@ sym-gen = { git = "https://github.com/lccc-project/sym-gen", features = [
 cmli-proc-macro.path = "cmli-proc-macro"
 paste = "1.0.15"
 bitflags = "2.10.0"
+bitfield-struct = "0.13.0"
 
 [workspace]
 members = ["cmli-proc-macro"]
 
 [features]
 x86 = []
+skyarch = []
 
 default = ["default-archs","default-formats"]
 default-archs = ["x86"]
-all-archs = ["default-archs"]
+all-archs = ["default-archs", "skyarch"]
 
 default-formats = []
 all-formats = ["default-formats"]

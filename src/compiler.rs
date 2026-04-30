@@ -2,7 +2,7 @@
 use std::{collections::HashSet, num::NonZeroU64};
 
 use crate::{
-    instr::Instruction, mach::{Machine, MachineMode, MachineSpec, Register, RegisterSpec}, target::{PropertyValue, TargetInfo, TargetProperties}, traits::{AsId, IdType, Name}, xva::{NoopKind, XvaCategory, XvaFrameProperties, XvaStatement}
+    instr::Instruction, mach::{Machine, MachineMode, MachineSpec, Register, RegisterSpec}, target::{PropertyValue, TargetInfo, TargetProperties}, traits::{AsId, IdType, Name}, xva::{NoopKind, XvaCategory, XvaFrameProperties, XvaRegister, XvaStatement}
 };
 
 
@@ -34,7 +34,17 @@ pub trait CompilerSpec: MachineSpec {
     fn lower_epilogue(&self, frame: XvaFrameProperties, mode: Self::MachineMode) -> Vec<XvaStatement>;
     fn emit_prologue(&self, frame: &mut XvaFrameProperties, mode: Self::MachineMode) -> Vec<Instruction>;
 
+    /// Helper function for implementing [`Self::lower_mce`]
+    /// 
+    /// ## Panics
+    /// Panics if a virtual register is passed, or if it is of an unexpected type
+    fn areg(reg: XvaRegister) -> Self::Register {
+        let XvaRegister::Physical(reg) = reg else {
+            panic!("Encountered physical register")
+        };
 
+        reg.downcast().expect("Bad register kind")
+    }
 }
 
 pub struct CompilerContext {
@@ -128,6 +138,17 @@ impl<C: CompilerSpec> Compiler for C {
             },
             XvaStatement::Noop(NoopKind::Normal) => {}
 
+            XvaStatement::Write(_, ty, _) => {
+                if ty.size > 0 {
+                    self.lower_mce(xva, mmode);
+                }
+            }
+            
+            XvaStatement::Expr(expr) => {
+                if expr.dest.size(self.machine(), mode) > 0 {
+                    self.lower_mce(xva, mmode);
+                }
+            }
             XvaStatement::RawInstr(_) |
             XvaStatement::OptGate(_, _) |
              XvaStatement::Use(_, _) |

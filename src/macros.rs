@@ -12,15 +12,15 @@ macro_rules! as_id_array {
                 arr: [T; N],
             ) -> [$id_ty; N] {
                 let mut x = [const {
-                    <$id_ty>::from_raw_parts(
-                        unsafe {$crate::macros::__NonZero::new_unchecked(1u64) },
+                    <$id_ty as $crate::traits::IdType>::from_raw_parts(
+                        <T as $crate::traits::AsRawId>::TYPE,
                         0,
                     )
                 }; N];
 
                 let mut i = 0;
                 while i < N {
-                    x[i] = <$id_ty>::new(arr[i]);
+                    x[i] = <$id_ty as $crate::traits::IdType>::new(arr[i]);
                     i += 1;
                 }
 

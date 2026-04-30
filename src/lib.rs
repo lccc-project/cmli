@@ -27,7 +27,14 @@
     macro_metavar_expr,
     const_trait_impl,
     const_cmp,
-    adt_const_params
+    adt_const_params,
+    const_closures,
+    const_array,
+    macro_metavar_expr_concat,
+    macro_attr,
+    proc_macro_hygiene,
+    stmt_expr_attributes,
+    iter_advance_by,
 )]
 // #![deny(missing_docs)]
 
