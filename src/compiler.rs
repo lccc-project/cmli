@@ -2,7 +2,7 @@
 use std::{collections::HashSet, num::NonZeroU64};
 
 use crate::{
-    instr::Instruction, mach::{Machine, MachineMode, MachineSpec, Register, RegisterSpec}, target::{PropertyValue, TargetInfo, TargetProperties}, traits::{AsId, IdType, Name}, xva::{NoopKind, XvaCategory, XvaFrameProperties, XvaRegister, XvaStatement}
+    instr::{Address, AddressKind, Instruction}, mach::{FeatureSet, Machine, MachineMode, MachineSpec, Register, RegisterSpec}, target::{PropertyValue, TargetInfo, TargetProperties}, traits::{AsId, IdType, Name}, xva::{NoopKind, XvaCategory, XvaFrameProperties, XvaRegister, XvaStatement}
 };
 
 
@@ -29,9 +29,9 @@ pub trait CompilerSpec: MachineSpec {
         size: u32,
     ) -> Option<u32>;
 
-    fn lower_mce(&self, stmt: &mut XvaStatement, mode: Self::MachineMode);
+    fn lower_mce(&self, stmt: &mut XvaStatement, mode: Self::MachineMode, context: &CompilerContext, features: &FeatureSet);
 
-    fn lower_epilogue(&self, frame: XvaFrameProperties, mode: Self::MachineMode) -> Vec<XvaStatement>;
+    fn lower_epilogue(&self, frame: &XvaFrameProperties, mode: Self::MachineMode) -> Vec<XvaStatement>;
     fn emit_prologue(&self, frame: &mut XvaFrameProperties, mode: Self::MachineMode) -> Vec<Instruction>;
 
     /// Helper function for implementing [`Self::lower_mce`]
@@ -52,6 +52,11 @@ pub struct CompilerContext {
     pub properties: TargetInfo,
     pub property_overrides: TargetProperties,
     pub target_features: HashSet<String>,
+    pub global_address_kind: AddressKind,
+    pub global_call_address_kind: AddressKind,
+    pub local_address_kind: AddressKind,
+    pub global_tls_kind: AddressKind,
+    pub local_tls_kind: AddressKind,
 }
 
 impl CompilerContext {
@@ -82,7 +87,7 @@ pub trait Compiler {
         size: u32,
     ) -> Option<u32>;
 
-    fn mce_lower(&self, xva: &mut XvaStatement, frame: &XvaFrameProperties, mode: MachineMode);
+    fn mce_lower(&self, xva: &mut XvaStatement, frame: &XvaFrameProperties, mode: &CompilerContext);
 
     fn emit_prologue(&self, frame: &mut XvaFrameProperties, mode: MachineMode) -> Vec<Instruction>;
 }
@@ -128,25 +133,26 @@ impl<C: CompilerSpec> Compiler for C {
         )
     }
 
-    fn mce_lower(&self, xva: &mut XvaStatement, frame: &XvaFrameProperties, mode: MachineMode) {
-        let mmode = mode.downcast::<<C as MachineSpec>::MachineMode>().unwrap();
+    fn mce_lower(&self, xva: &mut XvaStatement, frame: &XvaFrameProperties, context: &CompilerContext) {
+        let mode = context.mode;
+        let mmode = context.mode.downcast::<<C as MachineSpec>::MachineMode>().unwrap();
         match xva {
             XvaStatement::Elaborated(stmts) => {
                 for stmt in stmts {
-                    self.mce_lower(stmt, frame, mode);
+                    self.mce_lower(stmt, frame, context);
                 }
             },
             XvaStatement::Noop(NoopKind::Normal) => {}
 
             XvaStatement::Write(_, ty, _) => {
                 if ty.size > 0 {
-                    self.lower_mce(xva, mmode);
+                    self.lower_mce(xva, mmode, context, &frame.features);
                 }
             }
             
             XvaStatement::Expr(expr) => {
                 if expr.dest.size(self.machine(), mode) > 0 {
-                    self.lower_mce(xva, mmode);
+                    self.lower_mce(xva, mmode, context, &frame.features);
                 }
             }
             XvaStatement::RawInstr(_) |
@@ -159,12 +165,12 @@ impl<C: CompilerSpec> Compiler for C {
 
             XvaStatement::Return | XvaStatement::Tailcall { .. } => {
                 let mut stmts = if frame.has_prologue { 
-                    self.lower_epilogue(*frame, mmode) 
+                    self.lower_epilogue(frame, mmode) 
                 } else {
                     Vec::new()
                 };
 
-                self.lower_mce(xva, mmode);
+                self.lower_mce(xva, mmode, context, &frame.features);
 
                 stmts.push(core::mem::take(xva));
 
@@ -174,7 +180,7 @@ impl<C: CompilerSpec> Compiler for C {
             
 
             stmt => {
-                self.lower_mce(stmt, mmode);
+                self.lower_mce(stmt, mmode, context, &frame.features);
             }
         }
     }

@@ -1,13 +1,9 @@
 //! Information about machine architectures
 //! The base trait of cmli is [`Machine`] from which all features are derived. This trait is dyn-compatible so it can be type-erased
 use crate::{
-    compiler::CompilerSpec,
-    fmt::{self, PrettyPrinter},
-    instr::{Instruction, RegisterKind},
-    traits::{AsId, IdType, IntoId, Name},
-    xva::XvaCategory,
+    compiler::CompilerSpec, fmt::{self, PrettyPrinter}, helpers::{Bitset, BitsetIter, BitsetTy}, instr::{Instruction, RegisterKind}, intern::Symbol, traits::{AsId, IdType, IntoId, Name}, xva::XvaCategory
 };
-use std::{hash::Hasher, iter, num::NonZeroU64};
+use std::{borrow::Borrow, hash::Hasher, iter, num::NonZeroU64, ops::{Deref, DerefMut}};
 
 use crate::traits::AsRawId;
 
@@ -49,6 +45,12 @@ pub trait RegisterSpec: AsId<Register> + Name + Sized {
     fn regmap_bit(self) -> Option<u32>;
 }
 
+pub trait TargetFeatureSpec: Name + Sized {
+    fn feature_from_bit(bit: u32) -> Option<Self>;
+    fn feature_to_bit(&self) -> u32;
+    fn from_name(name: &str) -> Option<Self>;
+}
+
 pub trait MachineSpec: Sized {
     type Opcode: AsId<Opcode> + Name;
     const OPCODES: &[Opcode];
@@ -56,6 +58,8 @@ pub trait MachineSpec: Sized {
     const REGISTERS: &[Register];
     type MachineMode: AsId<MachineMode> + Name + Copy;
     const MACH_MODES: &[MachineMode];
+
+    type TargetFeature: TargetFeatureSpec + Copy;
 
     type Compiler: CompilerSpec<Machine = Self>;
 
@@ -214,6 +218,16 @@ impl<M: MachineSpec> Machine for M {
         let mode = mode.downcast().expect("Unknown Machine Mode");
         <Self as MachineSpec>::pretty_print_instr(&self, instr, mode, f)
     }
+    
+    fn feature_bit(&self, name: &str) -> u32 {
+        let bit = <<Self as MachineSpec>::TargetFeature>::from_name(name).unwrap_or_else(|| panic!("Unknown Target Feature \"{name}\"")).feature_to_bit();
+
+        bit
+    }
+    
+    fn feature_name(&self, bit: u32) -> Option<&'static str> {
+        <<Self as MachineSpec>::TargetFeature>::feature_from_bit(bit).map(|n| n.name())
+    }
 }
 
 pub trait Machine {
@@ -226,6 +240,10 @@ pub trait Machine {
     }
 
     fn pretty_print_instr(&self, opc: Opcode, mode: MachineMode, f: &mut core::fmt::Formatter) -> core::fmt::Result;
+
+    fn feature_bit(&self, name: &str) -> u32;
+
+    fn feature_name(&self, bit: u32) -> Option<&'static str>;
 }
 
 macro_rules! impl_machine_helper {
@@ -305,11 +323,25 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, Register> {
 const REGSET_SIZE: usize = 8;
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-pub struct Regset([u64; REGSET_SIZE]);
+pub struct Regset(Bitset<RegsetBit, REGSET_SIZE>);
+
+impl const Deref for Regset {
+    type Target = Bitset<RegsetBit, REGSET_SIZE>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl const DerefMut for Regset {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 impl Regset {
     pub const fn new() -> Self {
-        Self([0; REGSET_SIZE])
+        Self(Bitset::new())
     }
 
     pub fn from_registers<R: IntoId<Register>>(iter: impl IntoIterator<Item = R>, mach: &dyn Machine) -> Self {
@@ -318,11 +350,6 @@ impl Regset {
         array.insert_registers(iter, mach);
 
         array
-    }
-
-    pub const fn insert_bit(&mut self, bit: RegsetBit) {
-        let idx = (bit.0 >> 6) as usize;
-        self.0[idx] |= (1 << (bit.0 & 63));
     }
 
     pub fn insert_register<R: IntoId<Register>>(&mut self, reg: R, mach: &dyn Machine) {
@@ -339,11 +366,6 @@ impl Regset {
         }
     }
 
-    pub const fn remove_bit(&mut self, bit: RegsetBit) {
-        let idx = (bit.0 >> 6) as usize;
-        self.0[idx] &= !(1 << (bit.0 & 63));
-    }
-
     pub fn remove_register<R: IntoId<Register>>(&mut self, reg: R, mach: &dyn Machine) {
         let reg = reg.into_id();
 
@@ -356,12 +378,6 @@ impl Regset {
         for reg in iter {
             self.remove_register(reg, mach);
         }
-    }
-
-    pub const fn contains_bit(&self, bit: RegsetBit) -> bool {
-        let idx = (bit.0 >> 6) as usize;
-
-        (self.0[idx] & (1 << (bit.0 & 63))) != 0
     }
 
     pub fn contains_register<R: IntoId<Register>>(&self, reg: R, mach: &dyn Machine) -> bool {
@@ -387,19 +403,28 @@ impl Regset {
     pub fn retain_all<R: IntoId<Register>>(&mut self, reg: impl IntoIterator<Item = R>, mach: &dyn Machine) {
         let other = Self::from_registers(reg, mach);
 
-        self.retain_mask(other);
+        self.retain_mask(*other);
     }
+}
 
-    pub fn retain_mask(&mut self, other: Regset) {
-        for (a, b) in iter::zip(&mut self.0, other.0) {
-            *a &= b;
-        }
+impl FromIterator<RegsetBit> for Regset {
+    fn from_iter<T: IntoIterator<Item = RegsetBit>>(iter: T) -> Self {
+        Regset(Bitset::from_iter(iter))
     }
+}
 
-    pub fn remove_mask(&mut self, other: Regset) {
-        for (a, b) in iter::zip(&mut self.0, other.0) {
-            *a &= !b;
-        }
+impl Extend<RegsetBit> for Regset {
+    fn extend<T: IntoIterator<Item = RegsetBit>>(&mut self, iter: T) {
+        self.0.extend(iter)
+    }
+}
+
+impl IntoIterator for Regset {
+    type Item = RegsetBit;
+    type IntoIter = BitsetIter<RegsetBit, REGSET_SIZE>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
@@ -409,58 +434,19 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, Regset> {
     }
 }
 
-impl FromIterator<RegsetBit> for Regset {
-    fn from_iter<T: IntoIterator<Item = RegsetBit>>(iter: T) -> Self {
-        let mut v = const { Regset([0; REGSET_SIZE]) };
-        v.extend(iter);
-        v
-    }
-}
-
-impl Extend<RegsetBit> for Regset {
-    fn extend<T: IntoIterator<Item = RegsetBit>>(&mut self, iter: T) {
-        for bit in iter {
-            self.insert_bit(bit);
-        }
-    }
-}
-
-impl IntoIterator for Regset {
-    type Item = RegsetBit;
-    type IntoIter = RegsetIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        let mut iter = self.0.into_iter();
-
-        let val = iter.next().unwrap();
-        RegsetIter(iter, val, 0)
-    }
-}
-
-pub struct RegsetIter(core::array::IntoIter<u64, REGSET_SIZE>, u64, u32);
-
-impl Iterator for RegsetIter {
-    type Item = RegsetBit;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while self.1 == 0 {
-            self.2 = (self.2 & 63) + 64;
-            self.1 = self.0.next()?;
-        }
-
-        let p = self.1.trailing_zeros();
-        self.1 >>= p + 1;
-        let val = self.2 + p;
-        self.2 += p + 1;
-
-        Some(RegsetBit(val))
-    }
-}
-
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct RegsetBit(u32);
 
-pub struct RegsetIntoRegisters<'a>(RegsetIter, &'a dyn Registers, MachineMode);
+impl const BitsetTy for RegsetBit {
+    fn from_u32(val: u32) -> Self {
+        Self(val)
+    }
+    fn into_u32(self) -> u32 {
+        self.0
+    }
+}
+
+pub struct RegsetIntoRegisters<'a>(BitsetIter<RegsetBit, REGSET_SIZE>, &'a dyn Registers, MachineMode);
 
 impl<'a> Iterator for RegsetIntoRegisters<'a> {
     type Item = Register;
@@ -478,5 +464,164 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, RegsetBit> {
             Some(reg) => f.write_str(self.1.registers().name_of(reg)),
             None => f.write_str("/*UNKNOWN REGISTER*/"),
         }
+    }
+}
+
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub struct FeatureBit(u32);
+
+impl const BitsetTy for FeatureBit {
+    fn from_u32(bit: u32) -> Self {
+        Self(bit)
+    }
+
+    fn into_u32(self) -> u32 {
+        self.0
+    }
+}
+
+impl<'a> core::fmt::Display for PrettyPrinter<'a, FeatureBit> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = self.1.feature_name(self.0.0).expect("Panik");
+
+        f.write_str("\"")?;
+        f.write_str(name)?;
+        f.write_str("\"")
+    }
+}
+
+const FEATURESET_SIZE: usize = 4;
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub struct FeatureSet(Bitset<FeatureBit, FEATURESET_SIZE>);
+
+impl Default for FeatureSet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl const Deref for FeatureSet {
+    type Target = Bitset<FeatureBit, FEATURESET_SIZE>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl const DerefMut for FeatureSet {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl FeatureSet {
+    pub const fn new() -> Self {
+        Self(Bitset::new())
+    }
+
+    pub fn from_names<S: AsRef<str>, I: IntoIterator<Item = S>>(iter: I, mach: &dyn Machine) -> Self {
+        iter.into_iter().map(|s| mach.feature_bit(s.as_ref())).map(FeatureBit).collect()
+    }
+
+    pub fn insert_names<S: AsRef<str>, I: IntoIterator<Item = S>>(&mut self, iter: I, mach: &dyn Machine) {
+        for name in iter {
+            self.insert_name(name.as_ref(), mach)
+        }
+    }
+
+    pub fn insert_name(&mut self, name: &str, mach: &dyn Machine) {
+        let bit = mach.feature_bit(name);
+
+        self.insert_bit(FeatureBit(bit));
+    }
+
+    pub fn contains_name(&self, name: &str, mach: &dyn Machine) -> bool {
+        let bit = mach.feature_bit(name);
+
+        self.contains_bit(FeatureBit(bit))
+    }
+
+    pub fn remove_name(&mut self, name: &str, mach: &dyn Machine) {
+        let bit = mach.feature_bit(name);
+
+        self.remove_bit(FeatureBit(bit));
+    }
+
+    pub fn contains_all_names<S: AsRef<str>, I: IntoIterator<Item = S>>(&self, iter: I, mach: &dyn Machine) -> bool {
+        iter.into_iter().all(|n| self.contains_name(n.as_ref(), mach))
+    }
+
+    pub fn contains_any_names<S: AsRef<str>, I: IntoIterator<Item = S>>(&self, iter: I, mach: &dyn Machine) -> bool {
+        iter.into_iter().any(|n| self.contains_name(n.as_ref(), mach))
+    }
+
+    pub fn remove_names<S: AsRef<str>, I: IntoIterator<Item = S>>(&mut self, iter: I, mach: &dyn Machine) {
+        for item in iter {
+            self.remove_name(item.as_ref(), mach)
+        }
+    }
+
+    pub fn insert_feature<F: TargetFeatureSpec>(&mut self, feat: &F) {
+        let bit = feat.feature_to_bit();
+
+        self.insert_bit(FeatureBit(bit));
+    }
+
+    pub fn remove_feature<F: TargetFeatureSpec>(&mut self, feat: &F) {
+        let bit = feat.feature_to_bit();
+
+        self.remove_bit(FeatureBit(bit));
+    }
+
+    pub fn contains_feature<F: TargetFeatureSpec>(&self, feat: &F) -> bool {
+        let bit = feat.feature_to_bit();
+
+        self.contains_bit(FeatureBit(bit))
+    } 
+
+    pub fn remove_features<F: TargetFeatureSpec, I: IntoIterator<Item: Borrow<F>>>(&mut self, iter: I) {
+        for feat in iter {
+            self.remove_feature(feat.borrow())
+        }
+    }
+
+    pub fn contains_all_features<F: TargetFeatureSpec, I: IntoIterator<Item: Borrow<F>>>(&self, iter: I) -> bool {
+        iter.into_iter().all(|f| self.contains_feature(f.borrow()))
+    }
+
+    pub fn contains_any_features<F: TargetFeatureSpec, I: IntoIterator<Item: Borrow<F>>>(&self, iter: I) -> bool {
+        iter.into_iter().any(|f| self.contains_feature(f.borrow()))
+    }
+}
+
+impl<F: TargetFeatureSpec> FromIterator<F> for FeatureSet {
+    fn from_iter<T: IntoIterator<Item = F>>(iter: T) -> Self {
+        iter.into_iter().map(|f| f.feature_to_bit()).map(FeatureBit).collect()
+    }
+}
+
+impl FromIterator<FeatureBit> for FeatureSet {
+    fn from_iter<T: IntoIterator<Item = FeatureBit>>(iter: T) -> Self {
+        Self(Bitset::from_iter(iter))
+    }
+}
+
+impl<F: TargetFeatureSpec> Extend<F> for FeatureSet {
+    fn extend<T: IntoIterator<Item = F>>(&mut self, iter: T) {
+        self.extend(iter.into_iter().map(|f| f.feature_to_bit()).map(FeatureBit))
+    }
+}
+
+impl Extend<FeatureBit> for FeatureSet {
+    fn extend<T: IntoIterator<Item = FeatureBit>>(&mut self, iter: T) {
+        self.0.extend(iter)
+    }
+}
+
+impl core::fmt::Display for PrettyPrinter<'_, FeatureSet> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        PrettyPrinter(&self.0.0, self.1, self.2).fmt(f)
     }
 }

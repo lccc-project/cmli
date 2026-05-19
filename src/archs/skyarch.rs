@@ -3,7 +3,7 @@ use std::range::{RangeInclusive, RangeInclusiveIter};
 
 use bitflags::bitflags_match;
 
-use crate::{AsRawId, compiler::CompilerSpec, instr::{Address, AddressKind, Instruction, Operand, RegisterKind, RelocSym}, mach::{MachineSpec, ONE_MACHINE, OneMachine, Opcode, Register, RegisterSpec}, traits::{AsId, BitfieldEncodable, IdType, IntoId, Name}, xva::{BinaryOp, RightShiftMode, XvaCategory, XvaRegister, XvaStatement}};
+use crate::{AsRawId, compiler::{CompilerContext, CompilerSpec}, instr::{Address, AddressKind, Instruction, Operand, RegisterKind, RelocSym}, mach::{FeatureSet, MachineSpec, ONE_MACHINE, OneMachine, Opcode, Register, RegisterSpec, TargetFeatureSpec}, traits::{AsId, BitfieldEncodable, IdType, IntoId, Name}, xva::{BinaryOp, RightShiftMode, XvaCategory, XvaOperand, XvaRegister, XvaStatement}};
 
 pub type SkyarchMachine = OneMachine;
 
@@ -1235,6 +1235,12 @@ impl const IntoId<Opcode> for SkyarchInstruction {
     }
 }
 
+def_features! {
+    pub enum SkyarchTargetFeature {
+
+    }
+}
+
 impl MachineSpec for Skyarch {
     type Opcode = SkyarchOpcode;
 
@@ -1249,6 +1255,8 @@ impl MachineSpec for Skyarch {
     const MACH_MODES: &[crate::mach::MachineMode] = ONE_MACHINE;
 
     type Compiler = Self;
+
+    type TargetFeature = SkyarchTargetFeature;
 
     fn name(&self) -> &'static str {
         "skyarch"
@@ -1311,9 +1319,9 @@ impl CompilerSpec for Skyarch {
         }
     }
 
-    fn lower_mce(&self, stmt: &mut crate::xva::XvaStatement, _: Self::MachineMode) {
+    fn lower_mce(&self, stmt: &mut crate::xva::XvaStatement, _: Self::MachineMode, _: &CompilerContext, _: &FeatureSet) {
         let mut preamble = Vec::new();
-        match stmt {
+        match &*stmt {
             crate::xva::XvaStatement::Expr(expr) => {
                 let dest = Self::areg(expr.dest);
                 let instr = match expr.op {
@@ -1422,16 +1430,20 @@ impl CompilerSpec for Skyarch {
 
                 *stmt = XvaStatement::RawInstr(instr);
             },
-            crate::xva::XvaStatement::Tailcall { dest, params } => todo!(),
-            crate::xva::XvaStatement::Call { dest, .. } => {
-                let instr = match *dest {
+            rstmt @ (crate::xva::XvaStatement::Tailcall { dest,  .. } |
+            crate::xva::XvaStatement::Call { dest, .. }) => {
+                let link = match rstmt {
+                    XvaStatement::Tailcall { .. } => SkyarchRegno::r0,
+                    _ => SkyarchRegno::r31,
+                };
+                let instr = match dest {
                     crate::xva::XvaOperand::Register(reg) => {
-                        let reg = Self::areg(reg);
-                        Instruction::new_nullary(SkyarchInstruction::Jmpr { cond: SkyarchConditionCode::Always, link: SkyarchRegno::r31, dest: reg.regno() })
+                        let reg = Self::areg(*reg);
+                        Instruction::new_nullary(SkyarchInstruction::Jmpr { cond: SkyarchConditionCode::Always, link, dest: reg.regno() })
                     },
                     crate::xva::XvaOperand::Const(xva_const) => {
                         let opr = xva_const.to_direct_rel(AddressKind::Default, AddressKind::Default);
-                        Instruction::new(SkyarchInstruction::JmpW { cond: SkyarchConditionCode::Always, link: SkyarchRegno::r31, dest: SkyarchRegno::r15 }, vec![opr])
+                        Instruction::new(SkyarchInstruction::JmpW { cond: SkyarchConditionCode::Always, link, dest: SkyarchRegno::r15 }, vec![opr])
                     },
                     crate::xva::XvaOperand::FrameAddr(_) => todo!(),
                 };
@@ -1454,7 +1466,7 @@ impl CompilerSpec for Skyarch {
         }
     }
 
-    fn lower_epilogue(&self, frame: crate::xva::XvaFrameProperties, _: Self::MachineMode) -> Vec<crate::xva::XvaStatement> {
+    fn lower_epilogue(&self, frame: &crate::xva::XvaFrameProperties, _: Self::MachineMode) -> Vec<crate::xva::XvaStatement> {
         if !frame.has_prologue {
             return Vec::new();
         }

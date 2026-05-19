@@ -303,7 +303,7 @@ mod macros {
         }) => {
             impl $crate::traits::Name for $name{
                 fn name(&self) -> &'static str {
-                    match self {
+                    match *self {
                         $(Self::$var_name => ::core::stringify!($var_name)),*
                     }
                 }

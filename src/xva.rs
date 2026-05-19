@@ -1,7 +1,7 @@
 use std::num::NonZero;
 
 use crate::{
-    compiler::Compiler, fmt::pretty_print_list, instr::{Address, AddressKind, Instruction, MemoryOperand, Operand, RegisterKind, RelocSym}, intern::Symbol, mach::{Machine, MachineMode, Register, Regset}, traits::{AsId, IdType as _}, xva
+    compiler::{Compiler, CompilerContext}, fmt::pretty_print_list, instr::{Address, AddressKind, Instruction, MemoryOperand, Operand, RegisterKind, RelocSym}, intern::Symbol, mach::{FeatureSet, Machine, MachineMode, Register, Regset}, traits::{AsId, IdType as _, IntoId}, xva
 };
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -549,8 +549,8 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaRegister> {
 }
 
 impl XvaRegister {
-    pub const fn physical<R: [const] AsId<Register>>(reg: R) -> Self {
-        XvaRegister::Physical(Register::new(reg))
+    pub const fn physical<R: [const] IntoId<Register>>(reg: R) -> Self {
+        XvaRegister::Physical(reg.into_id())
     }
 
     pub fn size(&self, mach: &dyn Machine, mode: MachineMode) -> u64 {
@@ -612,6 +612,7 @@ pub struct XvaFrameProperties {
     pub has_prologue: bool,
     pub use_frame_pointer: bool,
     pub is_leaf: bool,
+    pub features: FeatureSet,
 
     #[doc(hidden)]
     pub __non_exhaustive: (),
@@ -620,12 +621,12 @@ pub struct XvaFrameProperties {
 impl XvaFrameProperties {
     pub const fn new() -> Self {
         Self {
-            frame_size: 0, frame_align: 1, call_align: 1, call_align_offset: 0, has_prologue: false, use_frame_pointer: false, is_leaf: false, __non_exhaustive: ()
+            frame_size: 0, frame_align: 1, call_align: 1, call_align_offset: 0, has_prologue: false, use_frame_pointer: false, is_leaf: false, features: FeatureSet::new(), __non_exhaustive: ()
         }
     }
 }
 
-impl core::fmt::Display for XvaFrameProperties {
+impl core::fmt::Display for PrettyPrinter<'_, XvaFrameProperties> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("FRAME: size ")?;
         self.frame_size.fmt(f)?;
@@ -639,6 +640,12 @@ impl core::fmt::Display for XvaFrameProperties {
         self.call_align.fmt(f)?;
         f.write_str(" offset ")?;
         self.call_align_offset.fmt(f)?;
+        f.write_str("\n")?;
+
+        f.write_str("TARGET FEATURES: ")?;
+
+        PrettyPrinter(&self.features, self.1, self.2).fmt(f)?;
+
         f.write_str("\n")?;
 
         f.write_str("FLAGS: ")?;
@@ -688,7 +695,7 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaFunction> {
         PrettyPrinter(&self.clobber_regs, self.1, self.2).fmt(f)?;
         f.write_str("\n")?;
 
-        self.frame_properties.fmt(f)?;
+        PrettyPrinter(&self.frame_properties, self.1, self.2).fmt(f)?;
 
         f.write_str("RETURN: ")?;
 
@@ -729,16 +736,16 @@ impl XvaFile {
         PrettyPrinter(self, mach, mode)
     }
 
-    pub fn lower_mc(&mut self, compiler: &dyn Compiler, mode: MachineMode) {
+    pub fn lower_mc(&mut self, compiler: &dyn Compiler, context: &CompilerContext) {
         for func in &mut self.functions {
             if func.body.frame_properties.has_prologue {
-                func.body.prologue = compiler.emit_prologue(&mut func.body.frame_properties, mode);
+                func.body.prologue = compiler.emit_prologue(&mut func.body.frame_properties, context.mode);
             }
             for block in &mut func.body.body {
                 match &mut block.body {
                     XvaBlockBody::Statement(stmts) => {
                         for stmt in &mut *stmts {
-                            compiler.mce_lower(stmt, &func.body.frame_properties, mode);
+                            compiler.mce_lower(stmt, &func.body.frame_properties, context);
                         }
 
                         let _stmts = core::mem::take(stmts);

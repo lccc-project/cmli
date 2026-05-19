@@ -5,7 +5,7 @@
 
 
 use crate::{
-    compiler::CompilerSpec, instr::{AddressKind, Instruction, Operand, RelocSym}, mach::{MachineMode, MachineSpec, Opcode, Register, RegisterSpec}, traits::{AsId, AsRawId, IdType, Name}, xva::{BinaryOp, XvaCategory, XvaExpr, XvaOpcode, XvaRegister, XvaStatement}
+    compiler::{CompilerContext, CompilerSpec}, instr::{AddressKind, Instruction, Operand, RelocSym}, mach::{FeatureSet, MachineMode, MachineSpec, Opcode, Register, RegisterSpec, TargetFeatureSpec}, traits::{AsId, AsRawId, IdType, Name}, xva::{BinaryOp, XvaCategory, XvaExpr, XvaOpcode, XvaRegister, XvaStatement}
 };
 
 use crate::instr::RegisterKind;
@@ -715,6 +715,130 @@ x86_instructions! {
     }
 }
 
+def_features!{
+    pub enum X86TargetFeature {
+        X87 "x87",
+        Fsgs "fsgs",
+        Cmpxchg "cmpxchg" | "cx",
+        Cpuid "cpuid",
+        Cmpxchg8b "cmpxchg8b" | "cx8",
+        Sysenter "sysenter",
+        Cmov "cmov",
+        Clfsh "clfsh",
+        Mmx "mmx",
+        Fxsr "fxsr",
+        Sse "sse",
+        Sse2 "sse2",
+        Sse3 "sse3",
+        PclmulQdq "pclmulqdq",
+        Monitor "monitor",
+        Vmx "vmx",
+        Ssse3 "ssse3",
+        Fma "fma",
+        Cmpxchg16b "cmpxchg16b" | "cx16",
+        Sahf "sahf",
+        Sse4_1 "sse4.1",
+        Sse4_2 "sse4.2",
+        Sse4 "sse4",
+        Movbe "movbe",
+        Popcnt "popcnt",
+        Aes "aes",
+        Xsave "xsave",
+        Avx "avx",
+        F16c "f16c",
+        Rdrand "rdrand",
+        PrefetchWt1 "prefetchwt1",
+        
+        FsgsBase "fsgsbase",
+        Bmli "bmli",
+        Avx2 "avx2",
+        Bmi2 "bmi2",
+        Erms "erms",
+        Rtm "rtm",
+        Avx512f "avx512f",
+        Avx512dq "avx512dq",
+        Rdseed "rdseed",
+        Adx "adx",
+        Avx512Ifma "avx512ifma",
+        ClflushOpt "clflushopt",
+        Clwb "clwb",
+        Avx512Pf "avx512pf",
+        Avx512Er "avx512er",
+        Avx512Cd "avx512cd",
+        Sha "sha",
+        Avx512Bw "avx512bw",
+
+        Mwait "mwait",
+        Syscall "syscall",
+        MmxExt "mmxext",
+        Rdtscp "rdtscp",
+        ThreeDNow "3dnow",
+        ThreeDNowExt "3dnowext",
+        Lahf "lahf",
+        Svm "svm",
+        Abm "abm",
+        ThreeDNowPrefetc "3dnowprefetch",
+        Xop "xop",
+        Fma4 "fma4",
+        MonitorX "monitorx",
+        Sse4a "sse4a",
+
+        Avx512Vbmi "avx512vmbi",
+        Waitpkg "waitpkg",
+        Avx512Vbmi2 "avx512vbmi2",
+        Gfni "gfni",
+        Vaes "vaes",
+        Vpclmulqdq "vpclmulqdq",
+        Avx512Vnni "avx512vnni",
+        Avx512BitAlg "avx512bitalg",
+        Avx512Vpopcntdq "avx512vpopcntdq",
+        Kl "kl",
+        WideKl "widekl",
+        Movdiri "movdiri",
+        Movdir64b "movdir64b",
+        Avx512VnniW "avx512vnniw",
+        Avx512Fmaps "avx512fmaps",
+        Fsrm "fsrm",
+        Avx512Vp2Intersect "avx512vp2intersect",
+        Serialize "serialize",
+        AmxBf16 "amx-bf16",
+        Avx512fp16 "avx512fp16",
+        AmxTile "amx-tile",
+        AmxInt8 "amx-int8",
+
+        XsaveOpt "xsaveopt",
+        XsaveC "xsavec",
+        XgetbvEcx1 "xgetbv_ecx1",
+        Xss "xss",
+        Xfd "xfd",
+
+        Sha512 "sha512",
+        Sm3 "sm3",
+        Sm4 "sm4",
+        RaoInt "rao-int",
+        AvxVnni "avxvnni",
+        Avx512Bf16 "avx512bf16",
+        CmpCcxAdd "cmpccxadd",
+        Fzrm "fzrm",
+        Fsrs "fsrs",
+        Rsrcs "rsrcs",
+        AmxFp16 "amx-fp16",
+        AvxIfma "avxifma",
+        Lam "lam",
+        MovRs "movrs",
+        AvxVnniInt8 "avxvnniint8",
+        AvxNeConvert "avxneconvert",
+        AmxComplex "amx-complex",
+        AvxVnniInt16 "avxvnniint16",
+        Avx10 "avx10",
+        ApxF "apx-f",
+
+        Avx10Vpmm "avx10-vpmm",
+        Avx10VnniInt "avx10vnniint",
+
+    }
+}
+
 /// [`Machine`][crate::mach::Machine] and [`Compiler`][crate::compiler::Compiler] for x86
 pub struct X86;
 
@@ -727,6 +851,8 @@ impl MachineSpec for X86 {
     const MACH_MODES: &[MachineMode] = as_id_array!(X86Mode::ALL_MODES => MachineMode);
     const REGISTERS: &[Register] = as_id_array!(X86Register::ALL_REGISTERS => Register);
     const OPCODES: &[Opcode] = as_id_array!(X86Opcode::ALL_OPCODES => Opcode);
+
+    type TargetFeature = X86TargetFeature;
 
     fn as_compiler(&self) -> &Self::Compiler {
         self
@@ -924,7 +1050,7 @@ impl CompilerSpec for X86 {
         }
     }
 
-    fn lower_mce(&self, stmt: &mut XvaStatement, mode: X86Mode) {
+    fn lower_mce(&self, stmt: &mut XvaStatement, mode: X86Mode, context: &CompilerContext, features: &FeatureSet) {
         let instr = match stmt {
             XvaStatement::Expr(xva_expr) => {
                 let XvaRegister::Physical(dest) = xva_expr.dest else {
@@ -953,7 +1079,7 @@ impl CompilerSpec for X86 {
                         oprs.push(Operand::Register(Register::new(dest)));
                     },
                     XvaOpcode::Const(xva_const) => {
-                        oprs.push(xva_const.to_readable(AddressKind::Default, AddressKind::GotRel, mode.supports_rel_addr(), None));
+                        oprs.push(xva_const.to_readable(context.local_address_kind, context.global_address_kind, mode.supports_rel_addr(), None));
                     },
                     
                     XvaOpcode::Move(reg) => {
@@ -983,7 +1109,7 @@ impl CompilerSpec for X86 {
                                 };
                                 oprs.push(Operand::Register(reg));
                             },
-                            crate::xva::XvaOperand::Const(xva_const) => oprs.push(xva_const.to_readable(AddressKind::Default, AddressKind::Plt, mode.supports_rel_addr(), Some(size as usize))),
+                            crate::xva::XvaOperand::Const(xva_const) => oprs.push(xva_const.to_readable(context.local_address_kind, context.global_address_kind, mode.supports_rel_addr(), Some(size as usize))),
                             crate::xva::XvaOperand::FrameAddr(_) => todo!(),
                         }
                     },
@@ -1010,7 +1136,7 @@ impl CompilerSpec for X86 {
                         oprs.push(Operand::Register(reg))
                     },
                     crate::xva::XvaOperand::Const(xva_const) => {
-                        oprs.push(xva_const.to_direct_rel(AddressKind::Default, AddressKind::Plt));
+                        oprs.push(xva_const.to_direct_rel(context.local_address_kind, context.global_call_address_kind));
                     },
                     crate::xva::XvaOperand::FrameAddr(_) => unreachable!("Cannot call the stack"),
                 }
@@ -1026,7 +1152,7 @@ impl CompilerSpec for X86 {
                         oprs.push(Operand::Register(reg))
                     },
                     crate::xva::XvaOperand::Const(xva_const) => {
-                        oprs.push(xva_const.to_direct_rel(AddressKind::Default, AddressKind::Plt));
+                        oprs.push(xva_const.to_direct_rel(context.local_address_kind, context.global_call_address_kind));
                     },
                     crate::xva::XvaOperand::FrameAddr(_) => unreachable!("Cannot call the stack"),
                 }
@@ -1045,7 +1171,7 @@ impl CompilerSpec for X86 {
         *stmt = XvaStatement::RawInstr(instr);
     }
 
-    fn lower_epilogue(&self, frame: crate::xva::XvaFrameProperties, mode: X86Mode) -> Vec<XvaStatement> {
+    fn lower_epilogue(&self, frame: &crate::xva::XvaFrameProperties, mode: X86Mode) -> Vec<XvaStatement> {
         let mode_gpr = mode.largest_gpr();
         let sp = GprName::sp.as_reg(mode_gpr);
         let mut epilogue = Vec::new();

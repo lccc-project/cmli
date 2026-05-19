@@ -35,6 +35,9 @@
     proc_macro_hygiene,
     stmt_expr_attributes,
     iter_advance_by,
+    debug_closure_helpers,
+    const_convert,
+    formatting_options,
 )]
 // #![deny(missing_docs)]
 
@@ -56,3 +59,5 @@ pub mod xva;
 pub mod archs;
 
 pub mod fmt;
+
+pub mod helpers;

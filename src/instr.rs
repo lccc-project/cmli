@@ -222,6 +222,7 @@ impl core::fmt::Display for RelocSym {
             AddressKind::Tpoff => f.write_str("@tpoff"),
             AddressKind::DTpoff => f.write_str("@gottpoff"),
             AddressKind::TlsDesc => f.write_str("@tlsdesc"),
+            AddressKind::LTlsDesc => f.write_str("@ltlsdesc"),
         }
     }
 }
@@ -235,4 +236,5 @@ pub enum AddressKind {
     Tpoff,
     DTpoff,
     TlsDesc,
+    LTlsDesc,
 }
