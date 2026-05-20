@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    mach::{Machine, MachineMode, RegisterSpec},
+    mach::{Machine, MachineMode, Register, RegisterSpec},
     xva::{
         self, BarrierKind, UseKind, XvaConst, XvaExpr, XvaOpcode, XvaOperand, XvaRegister,
         XvaStatement,
@@ -461,15 +461,25 @@ impl RemoveUnused {
         }
     }
 
-    pub fn remove_phase(&self, state: &mut RemoveUnusedState, stmt: &mut XvaStatement) {
+    pub fn remove_phase(&self, state: &mut RemoveUnusedState, stmt: &mut XvaStatement, mach: &dyn Machine) {
         match stmt {
             xva::XvaStatement::OptGate(kind, num) => state.push_gate(*kind, *num),
             xva::XvaStatement::EndOptGate(num) => state.pop_gate(*num),
             XvaStatement::Expr(xva_expr) => {
-                if !state.used_regs.contains(&xva_expr.dest)
+                if !(state.used_regs.contains(&xva_expr.dest) || state.used_regs.iter().any(|reg| match (&xva_expr.dest, reg) {
+                    (XvaRegister::Physical(pdest), XvaRegister::Physical(preg)) => {
+                        mach.registers().register_overlaps(*pdest, *preg)
+                    }
+                    _ => false
+                }))
                     && !xva_expr
                         .dest2
-                        .map_or(false, |v| state.used_regs.contains(&v))
+                        .map_or(false, |v| state.used_regs.contains(&v) || state.used_regs.iter().any(|reg| match (&xva_expr.dest, reg) {
+                            (XvaRegister::Physical(pdest), XvaRegister::Physical(preg)) => {
+                                mach.registers().register_overlaps(*pdest, *preg)
+                            }
+                            _ => false
+                        }))
                 {
                     *stmt = XvaStatement::Elaborated(vec![]);
                 } else if let XvaOpcode::Move(reg) = &xva_expr.op {
@@ -519,7 +529,7 @@ impl XvaFunctionOpt for RemoveUnused {
             match &mut stmt.body {
                 xva::XvaBlockBody::Statement(xva_statements) => {
                     for stmt in xva_statements {
-                        self.remove_phase(state, stmt);
+                        self.remove_phase(state, stmt, mach);
                     }
                 }
             }
