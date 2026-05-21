@@ -152,7 +152,7 @@ impl<Ty: BitsetTy, const N: usize> Iterator for BitsetIter<Ty, N> {
         
         
         let p = self.1.trailing_zeros();
-        eprintln!("base = {}, off = {p}", self.2);
+        // eprintln!("base = {}, off = {p}", self.2);
         self.1 >>= p + 1;
         let val = self.2 + p;
         self.2 += p + 1;
