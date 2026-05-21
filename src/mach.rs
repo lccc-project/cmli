@@ -541,7 +541,9 @@ impl const BitsetTy for FeatureBit {
 
 impl<'a> core::fmt::Display for PrettyPrinter<'a, FeatureBit> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = self.1.feature_name(self.0.0).expect("Panik");
+        let Some(name) = self.1.feature_name(self.0.0) else {
+            return f.write_fmt(format_args!("/*UNKNOWN FEATURE {:02X}*/", self.0.0))
+        };
 
         f.write_str("\"")?;
         f.write_str(name)?;
