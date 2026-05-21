@@ -5,7 +5,7 @@
 
 
 use crate::{
-    compiler::{CompilerContext, CompilerSpec}, instr::{AddressKind, Instruction, Operand, RelocSym}, mach::{FeatureSet, MachineMode, MachineSpec, Opcode, Register, RegisterSpec, TargetFeatureSpec}, traits::{AsId, AsRawId, IdType, Name}, xva::{BinaryOp, XvaCategory, XvaExpr, XvaOpcode, XvaRegister, XvaStatement}
+    compiler::{CompilerContext, CompilerSpec}, instr::{AddressKind, Instruction, Operand, RelocSym}, mach::{FeatureSet, MachineMode, MachineSpec, Opcode, Register, RegisterSpec, Regset, TargetFeatureSpec}, traits::{AsId, AsRawId, IdType, Name}, xva::{BinaryOp, XvaCategory, XvaExpr, XvaOpcode, XvaRegister, XvaStatement}
 };
 
 use crate::instr::RegisterKind;
@@ -32,7 +32,7 @@ impl X86Mode {
     ];
 
     /// Largest supported [`GprSize`] in the current mode
-    pub fn largest_gpr(&self) -> GprSize {
+    pub const fn largest_gpr(&self) -> GprSize {
         match self {
             X86Mode::Real => GprSize::Word,
             X86Mode::Protected16 => GprSize::Word,
@@ -42,8 +42,25 @@ impl X86Mode {
     }
 
     /// Convenience function for determining if the current mode supports relative addresses in ModR/M bytes. This is only true on [`X86Mode::Long`]
-    pub fn supports_rel_addr(&self) -> bool {
+    pub const fn supports_rel_addr(&self) -> bool {
         matches!(self, X86Mode::Long)
+    }
+
+    pub const fn max_standard_gpr(&self) -> u8 {
+        match self {
+            X86Mode::Long => 16,
+            _ => 8,
+        }
+    }
+
+    /// Convience function for determining if the current mode supports REX.RBX flags (in REX/REX2/VEX/EVEX)
+    pub const fn supports_rex(&self) -> bool {
+        matches!(self, X86Mode::Long)
+    }
+
+    /// Convience function for determining if the current mode supports arbitrary segmentation. 
+    pub const fn has_segmentation(&self) -> bool {
+        !matches!(self, X86Mode::Long)
     }
 }
 
@@ -83,7 +100,7 @@ macro_rules! define_x86_registers {
     {
         $(#[$meta:meta])*
         $vis:vis enum $name:ident ($class_enum:ident) {
-            $($(#[$var_meta:meta])* $class:ident $(#[norex] $(@ $_norex_tt:tt)?)? [ $($names:ident),* $(, #$prefix:ident _ $($suffix:ident)? $begin:literal..$end:literal)?]  $(($size:literal))? @ $category:ident $(($($cat_tt:tt)*))? $(overlaps [$($overlap_var:ident),*])? = $kind:expr),* $(,)?
+            $($(#[$var_meta:meta])* $class:ident $(#[norex] $(@ $_norex_tt:tt)?)? [ $(_, $(@ $_placeholder_tt:tt)?)* $($names:ident),* $(, #$prefix:ident _ $($suffix:ident)? $begin:literal..$end:literal)?]  $(($size:literal))? @ $category:ident $(($($cat_tt:tt)*))? $(overlaps [$($overlap_var:ident),*])? = $kind:expr),* $(,)?
         }
     } => {
         #[derive(Copy, Clone, Hash, PartialEq, Eq, AsRawId)]
@@ -142,9 +159,13 @@ macro_rules! define_x86_registers {
 
             #[doc(hidden)]
             pub const fn from_name_impl(name: &str) -> Self {
+
+                $(#[allow(non_upper_case_globals, dead_code)] const ${concat($class, _BASE)}: u8 = 0 $(+ 1 $($_placeholder_tt)?)?;)*
                 match name {
                     $(
-                        $(::core::stringify!($names) => Self::$class(${index()}),)*
+                        $(::core::stringify!($names) => {
+                            Self::$class(${concat($class, _BASE)} +  ${index()})
+                        })*
                     )*
 
                     __x => {
@@ -178,7 +199,10 @@ macro_rules! define_x86_registers {
             fn name(&self) -> &'static str {
                 match self {
                     $(Self::$class(n) => {
-                        match n $(& 0x7 $(# $_norex_tt)?)? {
+
+                        #[allow(non_upper_case_globals)]
+                        const ${concat($class, _BASE)}: u8 = 0 $(+ 1 $($_placeholder_tt)?)?;
+                        match n $(& 0x7 $(# $_norex_tt)?)? - ${concat($class, _BASE)} {
                             $(${index()} => ::core::stringify!($names),)*
                             $($begin..$end => {
                                 def_helper_arms!(n, 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 => $prefix _ $($suffix)?)
@@ -264,6 +288,8 @@ define_x86_registers! {
         Quad [rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, #r _ 8..32] (8) @ Int overlaps [ByteRex, Word, Double] = RegisterKind::GeneralPurpose,
         /// Segment Registers. 
         Segment #[norex] [es, cs, ss, ds, fs, gs] (2) @ Custom(RegisterKind::AddressSegment) = RegisterKind::AddressSegment,
+        /// Segment base registers. Accessible via read{fs,gs}base or msrs
+        SegmentBase #[norex] [_, _, _, _, fsbase, gsbase] @ Custom(RegisterKind::AddressOnly) = RegisterKind::AddressOnly,
         /// Floating point stack registers. Note that these correspond to the synthetic registers exposed by fcw.TOP. There is no correspondance for the real fp registers as fp registers
         St [, #st _ 0..8] (10) @ Float = RegisterKind::ScalarFp,
         /// MMX Technology Registers. 
@@ -344,6 +370,7 @@ impl GprSize {
 /// Helper enum for creating general purpose registers
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
+#[repr(u8)]
 pub enum GprName {
     /// The `rAX` register
     ax,
@@ -360,7 +387,24 @@ pub enum GprName {
     /// The `rSI` register
     si,
     /// The `rDI` register
-    di
+    di,
+    /// The `R8` register
+    r8,
+    /// The `R9` register
+    r9,
+    /// The `R10` register
+    r10,
+    /// The `R11` register
+    r11,
+    /// The `R12` register
+    r12,
+    /// The `R13` register
+    r13,
+    /// The `R14` register
+    r14,
+    /// The R15 Register
+    r15,
+
 }
 
 impl GprName {
@@ -381,6 +425,14 @@ impl GprName {
             GprSize::Double => X86Register::Double(regno),
             GprSize::Quad => X86Register::Quad(regno),
         }
+    }
+
+    pub const fn from_regno(n: u8) -> Self {
+        if n > 16 {
+            panic!("GprName::from_regno only supports 4-bit register number")
+        }
+
+        unsafe { core::mem::transmute(n) }
     }
 }
 
@@ -551,6 +603,7 @@ impl RegisterSpec for X86Register {
             n @ 0x60..0x68 => Some(X86Register::St((n & 7) as u8)),
             n @ 0x68..0x6C => Some(X86Register::X87SysReg((n & 3) as u8)),
             n @ 0x6C..0x6D => Some(X86Register::SseSysReg((n & 3) as u8)),
+            n @ 0x74..0x76 => Some(X86Register::SegmentBase((n & 7) as u8)),
             _ => None,
         }
     }
@@ -565,7 +618,8 @@ impl RegisterSpec for X86Register {
             | X86Register::Double(n)
             | X86Register::Quad(n) => Some(n as u32),
             X86Register::Segment(n) => Some(0x40 | n as u32),
-            X86Register::St(n) => Some(0x60 | n as u32),
+            X86Register::SegmentBase(n) => Some(0x70 | n as u32),
+            X86Register::St(n) => Some(0x60 | (n & 7) as u32),
             X86Register::Mmx(n) => Some(0x60 | ((8 - n) & 7) as u32),
             X86Register::Xmm(n) | X86Register::Ymm(n) | X86Register::Zmm(n) => {
                 Some(0x20 | n as u32)
@@ -576,6 +630,56 @@ impl RegisterSpec for X86Register {
             X86Register::X87SysReg(n) => Some(0x68 | n as u32),
             X86Register::SseSysReg(n) => Some(0x6C | n as u32),
         }
+    }
+
+    fn supported_registers(features: &FeatureSet, mode: Self::MachineMode) -> crate::mach::Regset {
+        let max_gpr = mode.max_standard_gpr();
+        let max_egpr = if mode.supports_rex() && features.contains_feature(&X86TargetFeature::ApxF) {
+            32
+        } else {
+            max_gpr
+        };
+        let mut base_regs = Regset::from_registers((0..max_egpr).map(GprName::from_regno).map(|r| r.as_reg(mode.largest_gpr())));
+
+        if mode.has_segmentation() {
+            base_regs.insert_registers(crate::x86_registers!(cs, ss, ds, es));
+        }
+
+        if features.contains_feature(&X86TargetFeature::Fsgs) || !mode.has_segmentation() {
+            base_regs.insert_registers(crate::x86_registers!(fs, gs))
+        }
+        
+        if !mode.has_segmentation() && features.contains_feature(&X86TargetFeature::FsgsBase) {
+            base_regs.insert_registers(crate::x86_registers!(fsbase, gsbase))
+        }
+        if features.contains_feature(&X86TargetFeature::X87) {
+            base_regs.insert_registers(crate::x86_registers!(fcw, ftw, fsw))
+        }
+
+        if features.contains_feature(&X86TargetFeature::X87) || features.contains_feature(&X86TargetFeature::Mmx) {
+            base_regs.insert_registers((0..8).map(X86Register::St));
+        }
+
+        if features.contains_feature(&X86TargetFeature::Sse) {
+            base_regs.insert_registers(crate::x86_registers!(mxcsr));
+            let max_sse = if mode.supports_rex() && (features.contains_feature(&X86TargetFeature::Avx512f) || features.contains_feature(&X86TargetFeature::Avx10)) {
+                32
+            } else {
+                max_gpr
+            };
+            base_regs.insert_registers((0..max_sse).map(X86Register::Xmm));
+        }
+
+        if features.contains_feature(&X86TargetFeature::Avx512f) {
+            base_regs.insert_registers((0..8).map(X86Register::Kreg));
+        }
+
+        if features.contains_feature(&X86TargetFeature::AmxTile) {
+            base_regs.insert_registers((0..8).map(X86Register::Tmm))
+        }
+
+
+        base_regs
     }
 }
 
@@ -904,7 +1008,8 @@ impl X86 {
                     X86Register::Debug(_) |
                     X86Register::ExtControl(_) |
                     X86Register::X87SysReg(_) |
-                    X86Register::SseSysReg(_)
+                    X86Register::SseSysReg(_) |
+                    X86Register::SegmentBase(_)
                     => panic!("Cannot support zeroinit of these registers"),
                 }
             },
@@ -932,6 +1037,7 @@ impl X86 {
                     X86Register::Control(_) |
                     X86Register::Debug(_) |
                     X86Register::Segment(_) => Some(X86Opcode::Mov),
+                    X86Register::SegmentBase(_) => todo!("fsgsbase"),
                     X86Register::St(_) => todo!("st"),
                     X86Register::Mmx(_) => todo!("mmx"),
                     X86Register::Xmm(_) => todo!("xmm"),

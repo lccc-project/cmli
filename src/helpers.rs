@@ -47,7 +47,24 @@ impl<'a, Ty: BitsetTy + PrettyPrint, const N: usize> core::fmt::Display for Pret
 
 impl<Ty, const N: usize> Bitset<Ty, N> {
     pub const fn new() -> Self {
+        const {assert!(N <= (usize::MAX / 64), "Length Cap of Bitset would overflow usize");}
         Self([0u64; N], PhantomData)
+    }
+
+    pub const fn len(&self) -> usize {
+        let mut i = 0;
+        let mut popcnt = 0;
+
+        while i < N {
+            popcnt += self.0[i].count_ones() as usize;
+            i += 1;
+        }
+
+        popcnt
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
@@ -59,7 +76,6 @@ impl<Ty: BitsetTy, const N: usize> Bitset<Ty, N> {
 
     }
     
-
     pub const fn remove_bit(&mut self, bit: Ty) where Ty: [const] BitsetTy {
         let bit = bit.into_u32();
         let idx = (bit >> 6) as usize;
@@ -71,6 +87,15 @@ impl<Ty: BitsetTy, const N: usize> Bitset<Ty, N> {
         let idx = (bit >> 6) as usize;
 
         (self.0[idx] & (1 << (bit & 63))) != 0
+    }
+
+    pub fn contains_any_bits(&self, other: Self) -> bool {
+        for (a, b) in core::iter::zip(&self.0, other.0) {
+            if (*a & b) != 0 {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn retain_mask(&mut self, other: Self) {
@@ -121,15 +146,15 @@ impl<Ty: BitsetTy, const N: usize> Iterator for BitsetIter<Ty, N> {
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.1 == 0 {
-            self.2 = (self.2 & 63) + 64;
+            self.2 = (self.2 & !63) + 64;
             self.1 = self.0.next()?;
         }
-
+        
+        
         let p = self.1.trailing_zeros();
         self.1 >>= p + 1;
         let val = self.2 + p;
         self.2 += p + 1;
-
         Some(Ty::from_u32(val))
     }
 }

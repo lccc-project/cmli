@@ -43,6 +43,8 @@ pub trait RegisterSpec: AsId<Register> + Name + Sized {
     fn from_bit(bit: u32, mode: Self::MachineMode) -> Option<Self>;
 
     fn regmap_bit(self) -> Option<u32>;
+
+    fn supported_registers(features: &FeatureSet, mode: Self::MachineMode) -> Regset;
 }
 
 pub trait TargetFeatureSpec: Name + Sized {
@@ -205,6 +207,15 @@ impl<M: MachineSpec> Machine for M {
                     None => panic!("Unknown MachineMode"),
                 }
             }
+
+            fn supported_registers(&self, features: &FeatureSet, mode: MachineMode) -> Regset {
+                match mode.downcast::<This::MachineMode>() {
+                    Some(mode) => {
+                        <This as MachineSpec>::Register::supported_registers(features, mode)
+                    }
+                    None => panic!("Unknown MachineMode"),
+                }
+            }
         }
     );
     machine_helper!(
@@ -291,6 +302,8 @@ pub trait Registers: DynList<Register> {
     fn regmap_from_bit(&self, bit: u32, mode: MachineMode) -> Option<Register>;
 
     fn register_overlaps(&self, reg1: Register, reg2: Register) -> bool;
+
+    fn supported_registers(&self, features: &FeatureSet, mode: MachineMode) -> Regset;
 }
 
 #[derive(IdType, Copy, Clone, Debug, Hash, PartialEq, Eq)]
@@ -344,15 +357,23 @@ impl Regset {
         Self(Bitset::new())
     }
 
-    pub fn from_registers<R: IntoId<Register>>(iter: impl IntoIterator<Item = R>, mach: &dyn Machine) -> Self {
+    pub fn from_regids<R: IntoId<Register>>(iter: impl IntoIterator<Item = R>, mach: &dyn Machine) -> Self {
         let mut array = Self::new();
 
-        array.insert_registers(iter, mach);
+        array.insert_regids(iter, mach);
 
         array
     }
 
-    pub fn insert_register<R: IntoId<Register>>(&mut self, reg: R, mach: &dyn Machine) {
+    pub fn from_registers<R: RegisterSpec>(iter: impl IntoIterator<Item = R>) -> Self {
+        let mut array = Self::new();
+
+        array.insert_registers(iter);
+
+        array
+    }
+
+    pub fn insert_regid<R: IntoId<Register>>(&mut self, reg: R, mach: &dyn Machine) {
         let reg = reg.into_id();
 
         let bit = mach.registers().regmap_bit(reg).expect("Cannot push register");
@@ -360,13 +381,13 @@ impl Regset {
         self.insert_bit(RegsetBit(bit))
     }
 
-    pub fn insert_registers<R: IntoId<Register>>(&mut self, iter: impl IntoIterator<Item = R>, mach: &dyn Machine) {
+    pub fn insert_regids<R: IntoId<Register>>(&mut self, iter: impl IntoIterator<Item = R>, mach: &dyn Machine) {
         for reg in iter {
-            self.insert_register(reg, mach);
+            self.insert_regid(reg, mach);
         }
     }
 
-    pub fn remove_register<R: IntoId<Register>>(&mut self, reg: R, mach: &dyn Machine) {
+    pub fn remove_regid<R: IntoId<Register>>(&mut self, reg: R, mach: &dyn Machine) {
         let reg = reg.into_id();
 
         let bit = mach.registers().regmap_bit(reg).expect("Cannot push register");
@@ -374,13 +395,13 @@ impl Regset {
         self.remove_bit(RegsetBit(bit))
     }
 
-    pub fn remove_registers<R: IntoId<Register>>(&mut self, iter: impl IntoIterator<Item = R>, mach: &dyn Machine) {
+    pub fn remove_regids<R: IntoId<Register>>(&mut self, iter: impl IntoIterator<Item = R>, mach: &dyn Machine) {
         for reg in iter {
-            self.remove_register(reg, mach);
+            self.remove_regid(reg, mach);
         }
     }
 
-    pub fn contains_register<R: IntoId<Register>>(&self, reg: R, mach: &dyn Machine) -> bool {
+    pub fn contains_regid<R: IntoId<Register>>(&self, reg: R, mach: &dyn Machine) -> bool {
         let reg = reg.into_id();
 
         let bit = mach.registers().regmap_bit(reg).expect("Cannot push register");
@@ -388,22 +409,59 @@ impl Regset {
         self.contains_bit(RegsetBit(bit))
     }
 
-    pub fn contains_any<R: IntoId<Register>>(&self, reg: impl IntoIterator<Item = R>, mach: &dyn Machine) -> bool {
-        reg.into_iter().any(|r| self.contains_register(r, mach))
+    pub fn contains_any_regids<R: IntoId<Register>>(&self, reg: impl IntoIterator<Item = R>, mach: &dyn Machine) -> bool {
+        reg.into_iter().any(|r| self.contains_regid(r, mach))
     }
 
-    pub fn contains_all<R: IntoId<Register>>(&self, reg: impl IntoIterator<Item = R>, mach: &dyn Machine) -> bool {
-        reg.into_iter().all(|r| self.contains_register(r, mach))
+    pub fn contains_all_regids<R: IntoId<Register>>(&self, reg: impl IntoIterator<Item = R>, mach: &dyn Machine) -> bool {
+        reg.into_iter().all(|r| self.contains_regid(r, mach))
     }
 
-    pub fn into_registers<'a>(self, mach: &'a dyn Machine, mode: MachineMode) -> RegsetIntoRegisters<'a> {
+    pub fn into_regids<'a>(self, mach: &'a dyn Machine, mode: MachineMode) -> RegsetIntoRegisters<'a> {
         RegsetIntoRegisters(self.into_iter(), mach.registers(), mode)
     }
 
-    pub fn retain_all<R: IntoId<Register>>(&mut self, reg: impl IntoIterator<Item = R>, mach: &dyn Machine) {
-        let other = Self::from_registers(reg, mach);
+    pub fn retain_all_regids<R: IntoId<Register>>(&mut self, reg: impl IntoIterator<Item = R>, mach: &dyn Machine) {
+        let other = Self::from_regids(reg, mach);
 
         self.retain_mask(*other);
+    }
+
+    pub fn insert_register<R: RegisterSpec>(&mut self, r: R) {
+        let bit = r.regmap_bit().expect("Cannot Insert Register");
+
+        self.insert_bit(RegsetBit(bit));
+    }
+    pub fn remove_register<R: RegisterSpec>(&mut self, r: R) {
+        let bit = r.regmap_bit().expect("Cannot remove Register");
+
+        self.remove_bit(RegsetBit(bit));
+    }
+
+    pub fn contains_register<R: RegisterSpec>(&self, r: R) -> bool {
+        let bit = r.regmap_bit().expect("Cannot remove Register");
+
+        self.contains_bit(RegsetBit(bit))
+    }
+
+    pub fn insert_registers<R: RegisterSpec, I: IntoIterator<Item = R>>(&mut self, regs: I) {
+        for reg in regs {
+            self.insert_register(reg)
+        }
+    }
+
+    pub fn remove_registers<R: RegisterSpec, I: IntoIterator<Item = R>>(&mut self, regs: I) {
+        for reg in regs {
+            self.remove_register(reg)
+        }
+    }
+
+    pub fn contains_all_registers<R: RegisterSpec, I: IntoIterator<Item = R>>(&self, regs: I) -> bool {
+        regs.into_iter().all(|r| self.contains_register(r))
+    }
+
+    pub fn contains_any_registers<R: RegisterSpec, I: IntoIterator<Item = R>>(&self, regs: I) -> bool {
+        regs.into_iter().all(|r| self.contains_register(r))
     }
 }
 
@@ -462,7 +520,7 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, RegsetBit> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.1.registers().regmap_from_bit(self.0.0, self.2) {
             Some(reg) => f.write_str(self.1.registers().name_of(reg)),
-            None => f.write_str("/*UNKNOWN REGISTER*/"),
+            None => f.write_fmt(format_args!("/*UNKNOWN REGISTER {:#04X}*/", self.0.0)),
         }
     }
 }

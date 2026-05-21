@@ -257,14 +257,14 @@ impl XvaStatementOpt for FoldRegisterPass {
                 ret_val,
                 call_clobber_regs,
             } => {
-                for reg in call_clobber_regs.into_registers(mach, state.mode) {
+                for reg in call_clobber_regs.into_regids(mach, state.mode) {
                     if state.test_barrier(BarrierKind::ELIDE_STORE) {
                         state.live_register_values.remove(&XvaRegister::Physical(reg));
                     } else {
                         state.mark_has_value(XvaRegister::Physical(reg)); // Clobbered Registers become unknown not uninit if we're in DNO
                     }
                 }
-                for reg in ret_val.into_registers(mach, state.mode) {
+                for reg in ret_val.into_regids(mach, state.mode) {
                     state.mark_has_value(XvaRegister::Physical(reg));
                 }
             }
@@ -409,7 +409,7 @@ impl RemoveUnused {
             xva::XvaStatement::Call { dest, params, .. }
             | xva::XvaStatement::Tailcall { dest, params } => {
                 self.collect_operand(state, *dest);
-                for reg in params.into_registers(mach, state.pass.mode) {
+                for reg in params.into_regids(mach, state.pass.mode) {
                     state.used_regs.insert(XvaRegister::Physical(reg));
                 }
             }
@@ -505,7 +505,7 @@ impl XvaFunctionOpt for RemoveUnused {
             .downcast_mut::<RemoveUnusedState>()
             .unwrap();
 
-        state.return_regs = func.return_regs.into_registers(mach, state.pass.mode).map(XvaRegister::Physical).collect();
+        state.return_regs = func.return_regs.into_regids(mach, state.pass.mode).map(XvaRegister::Physical).collect();
 
         for stmt in &mut func.body {
             match &mut stmt.body {
@@ -517,7 +517,7 @@ impl XvaFunctionOpt for RemoveUnused {
             }
         }
 
-        func.params.retain_all(state.used_regs.iter().filter_map(|r| {
+        func.params.retain_all_regids(state.used_regs.iter().filter_map(|r| {
             match r {
                 XvaRegister::Physical(r) => Some(*r),
                 _ => None

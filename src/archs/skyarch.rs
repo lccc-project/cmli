@@ -3,7 +3,7 @@ use std::range::{RangeInclusive, RangeInclusiveIter};
 
 use bitflags::bitflags_match;
 
-use crate::{AsRawId, compiler::{CompilerContext, CompilerSpec}, instr::{Address, AddressKind, Instruction, Operand, RegisterKind, RelocSym}, mach::{FeatureSet, MachineSpec, ONE_MACHINE, OneMachine, Opcode, Register, RegisterSpec, TargetFeatureSpec}, traits::{AsId, BitfieldEncodable, IdType, IntoId, Name}, xva::{BinaryOp, RightShiftMode, XvaCategory, XvaOperand, XvaRegister, XvaStatement}};
+use crate::{AsRawId, compiler::{CompilerContext, CompilerSpec}, instr::{Address, AddressKind, Instruction, Operand, RegisterKind, RelocSym}, mach::{FeatureSet, MachineSpec, ONE_MACHINE, OneMachine, Opcode, Register, RegisterSpec, Regset, TargetFeatureSpec}, traits::{AsId, BitfieldEncodable, IdType, IntoId, Name}, xva::{BinaryOp, RightShiftMode, XvaCategory, XvaOperand, XvaRegister, XvaStatement}};
 
 pub type SkyarchMachine = OneMachine;
 
@@ -385,6 +385,10 @@ impl RegisterSpec for SkyarchRegister {
             Map::Coprocessor(_) => RegisterKind::Special,
             _ => RegisterKind::System
         }
+    }
+
+    fn supported_registers(features: &FeatureSet, _: SkyarchMachine) -> crate::mach::Regset {
+        Regset::from_registers((1..32).map(SkyarchRegister).chain((0..32).map(|v| SkyarchRegister((2 << 5) | v))))
     }
 
     fn size(&self, _: Self::MachineMode) -> u32 {
