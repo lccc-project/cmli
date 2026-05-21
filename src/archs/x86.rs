@@ -854,7 +854,7 @@ def_features!{
         PrefetchWt1 "prefetchwt1",
         
         FsgsBase "fsgsbase",
-        Bmli "bmli",
+        Bmi1 "bmi1",
         Avx2 "avx2",
         Bmi2 "bmi2",
         Erms "erms",
@@ -871,6 +871,7 @@ def_features!{
         Avx512Cd "avx512cd",
         Sha "sha",
         Avx512Bw "avx512bw",
+        Avx512Vl "avx512vl",
 
         Mwait "mwait",
         Syscall "syscall",
