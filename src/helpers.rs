@@ -75,6 +75,12 @@ impl<Ty: BitsetTy, const N: usize> Bitset<Ty, N> {
         self.0[idx] |= 1 << (bit & 63);
 
     }
+
+    pub fn insert_bits(&mut self, other: Bitset<Ty, N>) {
+        for (a, b) in core::iter::zip(&mut self.0, other.0) {
+            *a |= b;
+        }
+    }
     
     pub const fn remove_bit(&mut self, bit: Ty) where Ty: [const] BitsetTy {
         let bit = bit.into_u32();

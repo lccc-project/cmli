@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    mach::{Machine, MachineMode, Register, RegisterSpec},
+    mach::{Machine, MachineMode, Register, RegisterSpec, Regset},
     xva::{
         self, BarrierKind, UseKind, XvaConst, XvaExpr, XvaOpcode, XvaOperand, XvaRegister,
         XvaStatement,
@@ -313,12 +313,13 @@ impl XvaStatementOpt for FoldRegisterPass {
 pub struct RemoveUnusedState {
     pass: PassState,
     used_regs: HashSet<XvaRegister>,
-    return_regs: Vec<XvaRegister>,
+    return_regs: Regset,
+    used_pregs: Regset,
 }
 
 impl RemoveUnusedState {
     pub fn new(mode: MachineMode) -> Self {
-        Self{pass: PassState::new(mode), used_regs: HashSet::new(), return_regs: Vec::new()}
+        Self{pass: PassState::new(mode), used_regs: HashSet::new(), return_regs: Regset::new(), used_pregs: Regset::new()}
     }
 }
 
@@ -409,13 +410,15 @@ impl RemoveUnused {
             xva::XvaStatement::Call { dest, params, .. }
             | xva::XvaStatement::Tailcall { dest, params } => {
                 self.collect_operand(state, *dest);
+                state.used_pregs.insert_bits(**params);
                 for reg in params.into_regids(mach, state.pass.mode) {
                     state.used_regs.insert(XvaRegister::Physical(reg));
                 }
             }
             xva::XvaStatement::Return => {
-                for reg in &state.return_regs {
-                    state.used_regs.insert(*reg);
+                state.used_pregs.insert_bits(*state.return_regs);
+                for reg in state.return_regs.into_regids(mach, state.pass.mode) {
+                    state.used_regs.insert(XvaRegister::Physical(reg));
                 }
             }
             xva::XvaStatement::Trap(_) => {}
@@ -461,29 +464,31 @@ impl RemoveUnused {
         }
     }
 
+    fn reg_used(&self, state: &RemoveUnusedState, reg: XvaRegister, mach: &dyn Machine) -> bool {
+        if state.used_regs.contains(&reg) {
+            return true;
+        }
+
+        match reg {
+            XvaRegister::Physical(preg) => {
+                state.used_pregs.contains_regid(preg, mach)
+            }
+            _ => false
+        }
+    }
+
     pub fn remove_phase(&self, state: &mut RemoveUnusedState, stmt: &mut XvaStatement, mach: &dyn Machine) {
         match stmt {
             xva::XvaStatement::OptGate(kind, num) => state.push_gate(*kind, *num),
             xva::XvaStatement::EndOptGate(num) => state.pop_gate(*num),
             XvaStatement::Expr(xva_expr) => {
-                if !(state.used_regs.contains(&xva_expr.dest) || state.used_regs.iter().any(|reg| match (&xva_expr.dest, reg) {
-                    (XvaRegister::Physical(pdest), XvaRegister::Physical(preg)) => {
-                        mach.registers().register_overlaps(*pdest, *preg)
-                    }
-                    _ => false
-                }))
-                    && !xva_expr
-                        .dest2
-                        .map_or(false, |v| state.used_regs.contains(&v) || state.used_regs.iter().any(|reg| match (&xva_expr.dest, reg) {
-                            (XvaRegister::Physical(pdest), XvaRegister::Physical(preg)) => {
-                                mach.registers().register_overlaps(*pdest, *preg)
-                            }
-                            _ => false
-                        }))
-                {
-                    *stmt = XvaStatement::Elaborated(vec![]);
-                } else if let XvaOpcode::Move(reg) = &xva_expr.op {
-                    if state.pass.test_barrier(BarrierKind::ELIDE_REGISTERS | BarrierKind::ELIDE_STORE | BarrierKind::ELIDE_INSTRS) && xva_expr.dest == *reg {
+                if state.pass.test_barrier(BarrierKind::ELIDE_REGISTERS | BarrierKind::ELIDE_INSTRS) {
+                    let dest = xva_expr.dest;
+                    let dest2 = xva_expr.dest2;
+
+                    if !self.reg_used(state,dest, mach) && !dest2.filter(|r| self.reg_used(state, *r, mach)).is_some() {
+                        *stmt = XvaStatement::Elaborated(vec![]);
+                    } else if let XvaOpcode::Move(reg) = xva_expr.op && reg == dest {
                         *stmt = XvaStatement::Elaborated(vec![]);
                     }
                 }
@@ -505,7 +510,7 @@ impl XvaFunctionOpt for RemoveUnused {
             .downcast_mut::<RemoveUnusedState>()
             .unwrap();
 
-        state.return_regs = func.return_regs.into_regids(mach, state.pass.mode).map(XvaRegister::Physical).collect();
+        state.return_regs = func.return_regs;
 
         for stmt in &mut func.body {
             match &mut stmt.body {

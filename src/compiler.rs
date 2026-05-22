@@ -40,7 +40,7 @@ pub trait CompilerSpec: MachineSpec {
     /// Panics if a virtual register is passed, or if it is of an unexpected type
     fn areg(reg: XvaRegister) -> Self::Register {
         let XvaRegister::Physical(reg) = reg else {
-            panic!("Encountered physical register")
+            panic!("Encountered virtual register")
         };
 
         reg.downcast().expect("Bad register kind")
