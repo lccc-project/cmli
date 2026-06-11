@@ -6,6 +6,7 @@ use crate::{
 };
 
 
+
 pub trait CompilerSpec: MachineSpec {
     type Machine: MachineSpec<
             Opcode = Self::Opcode,

@@ -7,8 +7,10 @@ use std::{borrow::Borrow, hash::Hasher, iter, num::NonZeroU64, ops::{Deref, Dere
 
 use crate::traits::AsRawId;
 
-/// Helper [`MachineMode`] type for machines that do not distinguish between operating modes
+
 #[derive(AsRawId, Copy, Clone, Debug, Hash, PartialEq, Eq, Name)]
+#[repr(u8)]
+/// Helper [`MachineMode`] type for machines that do not distinguish between operating modes
 pub enum OneMachine {
     /// Singleton instance of [`OneMachine`]
     Singleton,
@@ -22,8 +24,9 @@ pub const ONE_MACHINE: &[MachineMode] = as_id_array!([OneMachine::Singleton] => 
 /// Specification trait for providing information about CPU registers
 /// Can be combined with [`MachineSpec`] to implement the [`Registers`] trait
 pub trait RegisterSpec: AsId<Register> + Name + Sized {
-    /// The machine modes supported by this register kind. This should match the corresponding [`MachineSpec`]
+
     type MachineMode: AsId<MachineMode>;
+
     /// The Kind of the register
     fn kind(&self) -> RegisterKind;
     /// The size (in bytes) of the register in `mode`.

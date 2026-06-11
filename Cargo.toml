@@ -19,10 +19,12 @@ members = ["cmli-proc-macro"]
 [features]
 x86 = []
 skyarch = []
+m6502 = []
+w65 = ["m6502"]
 
 default = ["default-archs","default-formats"]
 default-archs = ["x86"]
-all-archs = ["default-archs", "skyarch"]
+all-archs = ["default-archs", "skyarch", "w65"]
 
 default-formats = []
 all-formats = ["default-formats"]

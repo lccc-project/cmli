@@ -1,8 +1,6 @@
 //! Traits used by `cmli`
 use std::{
-    any::Any,
-    hash::Hasher,
-    num::{NonZero, NonZeroU64},
+    any::Any, hash::Hasher, marker::PhantomData, num::{NonZero, NonZeroU64}
 };
 
 /// Identifies types that have a statically known [`Name`]
@@ -25,29 +23,25 @@ pub const unsafe trait AsRawId: Sized + Eq + 'static {
 }
 
 #[doc(hidden)]
-pub const unsafe trait TryAsU64Raw {
-    fn is_valid(val: u64) -> bool;
+pub const trait TryAsU64Raw: Sized {
+    fn from_val(val: u64) -> Option<Self>;
 }
 
-unsafe impl const TryAsU64Raw for u64 {
-    fn is_valid(_: u64) -> bool {
-        true
+impl const TryAsU64Raw for NonZeroU64 {
+    fn from_val(val: u64) -> Option<Self> {
+        Self::new(val)
     }
 }
 
-unsafe impl const TryAsU64Raw for NonZeroU64 {
-    fn is_valid(val: u64) -> bool {
-        val != 0
+impl<A> const TryAsU64Raw for PhantomData<A> {
+    fn from_val(val: u64) -> Option<Self> {
+        None
     }
 }
 
 #[doc(hidden)]
 pub const fn try_from_u64<T: const TryAsU64Raw>(val: u64) -> Option<T> {
-    if T::is_valid(val) {
-        Some(unsafe { crate::mem::transmute(val) })
-    } else {
-        None
-    }
+    T::from_val(val)
 }
 
 #[doc(hidden)]
@@ -118,6 +112,45 @@ pub const fn hash_string_const(base: u64, v: &str) -> u64 {
     state[0] ^ state[1] ^ state[2] ^ state[3]
 }
 
+#[doc(hidden)]
+pub const trait TryIntoU64Raw {
+    fn into_u64(self) -> u64;
+}
+
+macro_rules! impl_for_primitives {
+    ($($prim:ident),*) => {
+        $(
+            impl const TryIntoU64Raw for $prim {
+                fn into_u64(self) -> u64 {
+                    self as u64 & (1u64.unbounded_shl(Self::BITS).wrapping_sub(1))
+                }
+            }
+            impl const TryAsU64Raw for $prim {
+                fn from_val(val: u64) -> Option<Self> {
+                    if (val & (1u64.unbounded_shl(Self::BITS).wrapping_sub(1))) == val {
+                        Some(val as $prim)
+                    } else {
+                        None
+                    }
+                }
+            }
+        )*
+    }
+}
+
+impl_for_primitives!(u8, i8, u16, i16, u32, i32, u64, i64);
+
+impl<A> const TryIntoU64Raw for PhantomData<A> {
+    fn into_u64(self) -> u64 {
+        !0
+    }
+}
+
+#[doc(hidden)]
+pub const fn try_into_u64<T: const TryIntoU64Raw>(val: T) ->  u64{
+    val.into_u64()
+}
+
 /// A subtype of [`AsRawId`] that allows conversion to a specific [`IdType`]. Requires deriving [`AsRawId!`].
 pub const trait AsId<T: [const] IdType>: [const] AsRawId {}
 
@@ -169,68 +202,51 @@ pub const fn raw_id_type(x: u64) -> NonZeroU64 {
     }
 }
 
+
 mod macros {
     /// Derive macro for [`AsRawId`][super::AsRawId] currently supports enums with only unit variants, enums with variants that store a small (u32 or smaller) value, and structs that store a single `u64` or smaller
     #[macro_export]
     macro_rules! AsRawId {
-
-        derive() (#[repr($int:ident)] $(#[$meta:meta])* $vis:vis enum $name:ident {
-            $($(#[$var_meta:meta])* $var_name:ident ($field:ty) $(= $discrim:expr)?),*
+        derive() ($(#[$meta:meta])* $vis:vis enum $name:ident $(<$(const $__mach:ident: $__gen_ty:ty),* $(,)? >)? {
+            $($(#[$var_meta:meta])* $var_name:ident $(($field:ty))? $(= $discrim:expr)?),*
             $(,)?
         }) => {
-            unsafe impl const $crate::traits::AsRawId for $name {
-                const TYPE: ::core::num::NonZeroU64 = $crate::traits::raw_id_type($crate::traits::hash_string_const($crate::macros::rand_u64!(enum $name {
-                    $($var_name $(= $discrim)?),*
-                }), ::core::concat!(::core::module_path!(), "::", ::core::stringify!($name), $("\0", ::core::stringify!($var_name)),*)));
+            const _: () = {
+                #[repr(u32)]
+                $vis enum __Discrim {
+                    $($(#[$var_meta])* $var_name $(= $discrim)?),*
+                }
 
-                fn into_raw_id(self) -> u64 {
-                    let x = unsafe {(&self as *const Self as *const $int).read()} as u32 as u64;
+                unsafe impl$(< $(const $__mach: $__gen_ty),*>)? const $crate::traits::AsRawId for $name $(<$($__mach),*>)? {
+                    const TYPE: ::core::num::NonZeroU64 = $crate::traits::raw_id_type($crate::traits::hash_string_const($crate::macros::rand_u64!(enum $name {
+                        $($var_name $(= $discrim)?),*
+                    }), ::core::concat!(::core::module_path!(), "::", ::core::stringify!($name), $("\0", ::core::stringify!($var_name)),*)));
 
-                    match self {
-                        $(Self:: $var_name(__val) => {
-                            (__val as u32 as u64) | x << 32
-                        })*
+                    fn into_raw_id(self) -> u64 {
+
+                        match self {
+                            $(Self:: $var_name $((__val ${ignore($field)}))? => {
+                                $($crate::traits::try_into_u64::<$field>(__val) |)? ((__Discrim::$var_name as u64) << 32)
+                            })*
+                        }
+                    }
+
+                    #[allow(non_upper_case_globals)]
+                    fn from_raw_id(x: u64) -> Option<Self> {
+                        $(const $var_name: u64 = __Discrim::$var_name as u64;)*
+
+                        #[allow(non_uppercase_globals)]
+                        match x >> 32 {
+                            $($var_name => Some(Self::$var_name $((match $crate::traits::try_from_u64::<$field>(x & 0xFFFFFFFF) {
+                                Some(val) => val,
+                                None => return None
+                            }))?),)*
+                            _ => None
+                        }
                     }
                 }
 
-                #[allow(non_upper_case_globals)]
-                fn from_raw_id(x: u64) -> Option<Self> {
-                    $(const $var_name: u64 = (($name::$var_name(0)).into_raw_id() >> 32);)*
-
-                    #[allow(non_uppercase_globals)]
-                    match x >> 32 {
-                        $($var_name => Some(Self::$var_name ( (x & 0xFFFFFFFF) as $field)),)*
-                        _ => None
-                    }
-                }
-            }
-        };
-
-
-        derive() ($(#[$meta:meta])* $vis:vis enum $name:ident {
-            $($(#[$var_meta:meta])* $var_name:ident $(= $discrim:expr)?),*
-            $(,)?
-        }) => {
-            unsafe impl const $crate::traits::AsRawId for $name {
-                const TYPE: ::core::num::NonZeroU64 = $crate::traits::raw_id_type($crate::traits::hash_string_const($crate::macros::rand_u64!(enum $name {
-                    $($var_name $(= $discrim)?),*
-                }), ::core::concat!(::core::module_path!(), "::", ::core::stringify!($name), $("\0", ::core::stringify!($var_name)),*)));
-
-                fn into_raw_id(self) -> u64 {
-                    self as u64
-                }
-
-                #[allow(non_upper_case_globals)]
-                fn from_raw_id(x: u64) -> Option<Self> {
-                    $(const $var_name: u64 = $name::$var_name as u64;)*
-
-                    #[allow(non_uppercase_globals)]
-                    match x {
-                        $($var_name => Some(Self::$var_name),)*
-                        _ => None
-                    }
-                }
-            }
+            };
         };
 
 

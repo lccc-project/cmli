@@ -31,8 +31,6 @@
     const_closures,
     const_array,
     macro_metavar_expr_concat,
-    macro_attr,
-    proc_macro_hygiene,
     stmt_expr_attributes,
     iter_advance_by,
     debug_closure_helpers,
@@ -61,3 +59,5 @@ pub mod archs;
 pub mod fmt;
 
 pub mod helpers;
+
+pub mod writer;

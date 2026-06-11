@@ -320,19 +320,6 @@ impl Map {
     }
 }
 
-macro_rules! regno_to_static_name {
-    ($e:expr => $prefix:literal: $($vals:literal)+) => {
-        match $e {
-            $($vals => ::core::concat!($prefix, ::core::stringify!($vals)),)*
-            _ => unreachable!(),
-        }
-    };
-
-    ($e:expr => $prefix:literal) => {
-        regno_to_static_name!($e => $prefix: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31)
-    };
-}
-
 impl core::fmt::Display for SkyarchRegister {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.name())
@@ -373,6 +360,7 @@ impl Name for SkyarchRegister {
 }
 
 impl RegisterSpec for SkyarchRegister {
+    
     type MachineMode = SkyarchMachine;
 
     fn kind(&self) -> RegisterKind {
@@ -387,7 +375,7 @@ impl RegisterSpec for SkyarchRegister {
         }
     }
 
-    fn supported_registers(features: &FeatureSet, _: SkyarchMachine) -> crate::mach::Regset {
+    fn supported_registers(features: &FeatureSet, _: Self::MachineMode) -> crate::mach::Regset {
         Regset::from_registers((1..32).map(SkyarchRegister).chain((0..32).map(|v| SkyarchRegister((2 << 5) | v))))
     }
 
