@@ -58,10 +58,14 @@ pub mod compiler;
 #[cfg(feature = "xva")]
 pub mod xva;
 
+
 pub mod archs;
 
 pub mod fmt;
 
 pub mod helpers;
 
+pub mod reloc;
+
 pub mod writer;
+pub mod reader;
