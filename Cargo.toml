@@ -22,9 +22,11 @@ skyarch = []
 m6502 = []
 w65 = ["m6502"]
 
-default = ["default-archs","default-formats"]
+default = ["default-archs","default-formats", "xva"]
 default-archs = ["x86"]
 all-archs = ["default-archs", "skyarch", "w65"]
 
 default-formats = []
 all-formats = ["default-formats"]
+
+xva = []

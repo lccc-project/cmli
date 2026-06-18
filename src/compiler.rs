@@ -48,6 +48,21 @@ pub trait CompilerSpec: MachineSpec {
     }
 }
 
+pub trait CheckCompiler: Compiler {
+    type Machine: Machine;
+
+    #[doc(hidden)]
+    fn __check() where Self: Sized + CompilerSpec;
+}
+
+impl<C: CompilerSpec> CheckCompiler for C {
+    type Machine = C::Machine;
+
+    fn __check() {
+
+    }
+}
+
 pub struct CompilerContext {
     pub mode: MachineMode,
     pub properties: TargetInfo,

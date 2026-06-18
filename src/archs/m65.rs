@@ -1,6 +1,9 @@
 use std::{hash::Hash, marker::{PhantomData, ConstParamTy}};
 
-use crate::{compiler::CompilerSpec, instr::RegisterKind, mach::{Machine, MachineMode, MachineSpec, OneMachine, Opcode, Register, RegisterSpec, Regset, TargetFeatureSpec}, traits::{AsId, AsRawId, Name}, xva::XvaCategory};
+use crate::{instr::RegisterKind, mach::{Machine, MachineMode, MachineSpec, OneMachine, Opcode, Register, RegisterSpec, Regset, TargetFeatureSpec}, traits::{AsId, AsRawId, Name}};
+
+#[cfg(feature = "xva")]
+use crate::{compiler::CompilerSpec, xva::XvaCategory};
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, AsRawId)]
 pub struct W65Mode(u32);
@@ -129,6 +132,7 @@ impl<const Kind: M65Kind> RegisterSpec for M65Register<Kind> {
         }
     }
     
+    #[cfg(feature = "xva")]
     fn category(&self, mode: Self::MachineMode) -> crate::xva::XvaCategory {
         match self.kind() {
             RegisterKind::GeneralPurpose => XvaCategory::Int,
@@ -265,35 +269,7 @@ impl TargetFeatureSpec for M65TargetFeature {
 
 pub struct M65Machine<const Kind: M65Kind>;
 
-trait M65Compilation {
-    fn available_registers(
-        &self,
-        context: &crate::compiler::CompilerContext,
-        mode: W65Mode,
-        cat: XvaCategory,
-        size: u32,
-    ) -> Option<&[Register]> {
-        todo!()
-    }
-
-    fn promote_size(
-        &self,
-        context: &crate::compiler::CompilerContext,
-        mode: W65Mode,
-        cat: XvaCategory,
-        size: u32,
-    ) -> Option<u32> {
-        todo!()
-    }
-
-    fn lower_mce(&self, stmt: &mut crate::xva::XvaStatement, mode: W65Mode, context: &crate::compiler::CompilerContext, features: &crate::mach::FeatureSet);
-
-    fn lower_epilogue(&self, frame: &crate::xva::XvaFrameProperties, mode: W65Mode) -> Vec<crate::xva::XvaStatement>;
-
-    fn emit_prologue(&self, frame: &mut crate::xva::XvaFrameProperties, mode: W65Mode) -> Vec<crate::instr::Instruction>;
-}
-
-impl<const Kind: M65Kind> MachineSpec for M65Machine<Kind> where Self: M65Compilation {
+impl<const Kind: M65Kind> MachineSpec for M65Machine<Kind> {
     type Opcode = M65Opcode<Kind>;
 
     const OPCODES: &[Opcode] = as_id_array!(M65Opcode::<Kind>::ALL_OPCODES => Opcode);
@@ -309,7 +285,6 @@ impl<const Kind: M65Kind> MachineSpec for M65Machine<Kind> where Self: M65Compil
 
     type TargetFeature = M65TargetFeature;
 
-    type Compiler = Self;
 
     fn name(&self) -> &'static str {
         match Kind {
@@ -318,74 +293,9 @@ impl<const Kind: M65Kind> MachineSpec for M65Machine<Kind> where Self: M65Compil
         }
     }
 
-    
-    fn as_compiler(&self) -> &Self::Compiler {
-        unsafe { core::mem::transmute(self) }
+    #[cfg(feature = "xva")]
+    fn as_compiler(&self) -> Option<&dyn crate::compiler::CheckCompiler<Machine=Self>> {
+        core::any::try_as_dyn(self)
     }
 }
 
-impl<const Kind: M65Kind> CompilerSpec for M65Machine<Kind> where Self: M65Compilation {
-    type Machine = Self;
-
-    fn available_registers(
-        &self,
-        context: &crate::compiler::CompilerContext,
-        mode: Self::MachineMode,
-        cat: XvaCategory,
-        size: u32,
-    ) -> Option<&[Register]> {
-        <Self as M65Compilation>::available_registers(self, context, mode, cat, size)
-    }
-
-    fn promote_size(
-        &self,
-        context: &crate::compiler::CompilerContext,
-        mode: Self::MachineMode,
-        cat: XvaCategory,
-        size: u32,
-    ) -> Option<u32> {
-        <Self as M65Compilation>::promote_size(self, context, mode, cat, size)
-    }
-
-    fn lower_mce(&self, stmt: &mut crate::xva::XvaStatement, mode: Self::MachineMode, context: &crate::compiler::CompilerContext, features: &crate::mach::FeatureSet) {
-        <Self as M65Compilation>::lower_mce(self, stmt, mode, context, features);
-    }
-
-    fn lower_epilogue(&self, frame: &crate::xva::XvaFrameProperties, mode: Self::MachineMode) -> Vec<crate::xva::XvaStatement> {
-        <Self as M65Compilation>::lower_epilogue(self, frame, mode)
-    }
-
-    fn emit_prologue(&self, frame: &mut crate::xva::XvaFrameProperties, mode: Self::MachineMode) -> Vec<crate::instr::Instruction> {
-        <Self as M65Compilation>::emit_prologue(self, frame, mode)
-    }
-}
-
-
-impl M65Compilation for M65Machine<{M65Kind::W65}> {
-    fn lower_mce(&self, stmt: &mut crate::xva::XvaStatement, mode: W65Mode, context: &crate::compiler::CompilerContext, features: &crate::mach::FeatureSet) {
-        match stmt {
-            crate::xva::XvaStatement::Expr(xva_expr) => todo!(),
-            crate::xva::XvaStatement::Write(xva_operand, xva_type, xva_register) => todo!(),
-            crate::xva::XvaStatement::Jump(symbol) => todo!(),
-            crate::xva::XvaStatement::Tailcall { dest, params } => todo!(),
-            crate::xva::XvaStatement::Call { dest, params, ret_val, call_clobber_regs } => todo!(),
-            crate::xva::XvaStatement::Return => todo!(),
-            crate::xva::XvaStatement::Trap(xva_trap) => todo!(),
-            crate::xva::XvaStatement::RawInstr(instruction) => todo!(),
-            crate::xva::XvaStatement::OptGate(barrier_kind, _) => todo!(),
-            crate::xva::XvaStatement::EndOptGate(_) => todo!(),
-            crate::xva::XvaStatement::Noop(noop_kind) => todo!(),
-            crate::xva::XvaStatement::Elaborated(xva_statements) => todo!(),
-            crate::xva::XvaStatement::Use(xva_registers, use_kind) => todo!(),
-            crate::xva::XvaStatement::Fallthrough(symbol) => todo!(),
-        }
-    }
-
-    fn lower_epilogue(&self, frame: &crate::xva::XvaFrameProperties, mode: W65Mode) -> Vec<crate::xva::XvaStatement> {
-        todo!()
-    }
-
-    fn emit_prologue(&self, frame: &mut crate::xva::XvaFrameProperties, mode: W65Mode) -> Vec<crate::instr::Instruction> {
-        todo!()
-    }
-}

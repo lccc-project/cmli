@@ -1,7 +1,7 @@
 //! Information about machine architectures
 //! The base trait of cmli is [`Machine`] from which all features are derived. This trait is dyn-compatible so it can be type-erased
 use crate::{
-    compiler::CompilerSpec, fmt::{self, PrettyPrinter}, helpers::{Bitset, BitsetIter, BitsetTy}, instr::{Instruction, RegisterKind}, intern::Symbol, traits::{AsId, IdType, IntoId, Name}, xva::XvaCategory
+    fmt::{self, PrettyPrinter}, helpers::{Bitset, BitsetIter, BitsetTy}, instr::{Instruction, RegisterKind}, intern::Symbol, traits::{AsId, IdType, IntoId, Name}
 };
 use std::{borrow::Borrow, hash::Hasher, iter, num::NonZeroU64, ops::{Deref, DerefMut}};
 
@@ -33,7 +33,22 @@ pub trait RegisterSpec: AsId<Register> + Name + Sized {
     fn size(&self, mode: Self::MachineMode) -> u32;
 
     /// Determines the category of the specified register in the current `mode`
-    fn category(&self, mode: Self::MachineMode) -> XvaCategory;
+    /// THe default impl calls [`Self::kind()`]
+    #[cfg(feature = "xva")]
+    fn category(&self, mode: Self::MachineMode) -> crate::xva::XvaCategory {
+        use crate::xva::XvaCategory;
+        match self.kind() {
+            RegisterKind::GeneralPurpose |
+            RegisterKind::IntegerOnly => XvaCategory::Int,
+            
+            RegisterKind::ScalarFp => XvaCategory::Float,
+            RegisterKind::VectorAny |
+            RegisterKind::VectorInt |
+            RegisterKind::VectorFloat |
+            RegisterKind::VectorBit => XvaCategory::VectorAny,
+            kind => XvaCategory::Custom(kind),
+        }
+    }
 
     /// Determines the optimistic alignment requirement for the physical register in the current `mode`
     fn align(&self, mode: Self::MachineMode) -> u32 {
@@ -66,11 +81,7 @@ pub trait MachineSpec: Sized {
 
     type TargetFeature: TargetFeatureSpec + Copy;
 
-    type Compiler: CompilerSpec<Machine = Self>;
-
     fn name(&self) -> &'static str;
-
-    fn as_compiler(&self) -> &Self::Compiler;
 
     fn pretty_print_size(&self, size: usize) -> Option<&'static str> {
         None
@@ -78,6 +89,11 @@ pub trait MachineSpec: Sized {
 
     fn pretty_print_instr(&self, instr: Self::Opcode, mode: Self::MachineMode, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         f.write_str(instr.name())
+    }
+
+    #[cfg(feature = "xva")]
+    fn as_compiler(&self) -> Option<&dyn crate::compiler::CheckCompiler<Machine = Self>>{
+        None
     }
 }
 
@@ -101,7 +117,7 @@ macro_rules! machine_helper {
     (fn $method:ident(&self) -> $ty_name:ident {
         $assoc_const:ident
     } $(impl <$ident:ident> $trait:ident {
-        $(fn $fname:ident(&self, $($param:ident: $param_ty:ty),*) -> $ret_ty:ty $block:block)*
+        $($(#[$inmeta:meta])* fn $fname:ident(&self, $($param:ident: $param_ty:ty),*) -> $ret_ty:ty $block:block)*
     })?) => {
         fn $method(&self) -> <(&(dyn DynList<$ty_name> + '_), $(&(dyn $trait + '_))?) as TyOrDefault>::Type {
             struct ListHelper<M>(core::marker::PhantomData<M>);
@@ -119,7 +135,7 @@ macro_rules! machine_helper {
             }
 
             $(impl<$ident: MachineSpec> $trait for ListHelper<$ident> {
-                $(fn $fname(&self, $($param: $param_ty),*) -> $ret_ty $block)*
+                $($(#[$inmeta])*  fn $fname(&self, $($param: $param_ty),*) -> $ret_ty $block)*
             })?
 
             &ListHelper::<Self>(core::marker::PhantomData)
@@ -185,7 +201,8 @@ impl<M: MachineSpec> Machine for M {
                 }
             }
 
-            fn register_category(&self, reg: Register, mode: MachineMode) -> XvaCategory {
+            #[cfg(feature = "xva")]
+            fn register_category(&self, reg: Register, mode: MachineMode) -> crate::xva::XvaCategory {
                 match (
                     reg.downcast::<This::Register>(),
                     mode.downcast::<This::MachineMode>(),
@@ -219,6 +236,8 @@ impl<M: MachineSpec> Machine for M {
                     None => panic!("Unknown MachineMode"),
                 }
             }
+
+            fn __sealed(&self,) -> () {}
         }
     );
     machine_helper!(
@@ -242,6 +261,14 @@ impl<M: MachineSpec> Machine for M {
     fn feature_name(&self, bit: u32) -> Option<&'static str> {
         <<Self as MachineSpec>::TargetFeature>::feature_from_bit(bit).map(|n| n.name())
     }
+
+    #[cfg(feature = "xva")]
+    fn as_compiler(&self) -> Option<&dyn crate::compiler::Compiler> {
+        match <Self as MachineSpec>::as_compiler(self) {
+            Some(c) => Some(c),
+            None => None,
+        }
+    }
 }
 
 pub trait Machine {
@@ -258,6 +285,12 @@ pub trait Machine {
     fn feature_bit(&self, name: &str) -> u32;
 
     fn feature_name(&self, bit: u32) -> Option<&'static str>;
+
+    #[cfg(feature = "xva")]
+    fn as_compiler(&self) -> Option<&dyn crate::compiler::Compiler> {
+        None
+    }
+
 }
 
 macro_rules! impl_machine_helper {
@@ -299,7 +332,9 @@ pub trait Registers: DynList<Register> {
     fn register_kind(&self, reg: Register) -> RegisterKind;
     fn register_size(&self, reg: Register, mode: MachineMode) -> u32;
     fn register_align(&self, reg: Register, mode: MachineMode) -> u32;
-    fn register_category(&self, reg: Register, mode: MachineMode) -> XvaCategory;
+
+    #[cfg(feature = "xva")]
+    fn register_category(&self, reg: Register, mode: MachineMode) -> crate::xva::XvaCategory;
 
     fn regmap_bit(&self, reg: Register) -> Option<u32>;
     fn regmap_from_bit(&self, bit: u32, mode: MachineMode) -> Option<Register>;
@@ -307,6 +342,9 @@ pub trait Registers: DynList<Register> {
     fn register_overlaps(&self, reg1: Register, reg2: Register) -> bool;
 
     fn supported_registers(&self, features: &FeatureSet, mode: MachineMode) -> Regset;
+
+    #[doc(hidden)]
+    fn __sealed(&self);
 }
 
 #[derive(IdType, Copy, Clone, Debug, Hash, PartialEq, Eq)]

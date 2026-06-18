@@ -5,8 +5,11 @@
 
 
 use crate::{
-    compiler::{CompilerContext, CompilerSpec}, instr::{AddressKind, Instruction, Operand, RelocSym}, mach::{FeatureSet, MachineMode, MachineSpec, Opcode, Register, RegisterSpec, Regset, TargetFeatureSpec}, traits::{AsId, AsRawId, IdType, Name}, xva::{BinaryOp, XvaCategory, XvaExpr, XvaOpcode, XvaRegister, XvaStatement}
+    instr::{AddressKind, Instruction, Operand, RelocSym}, mach::{FeatureSet, MachineMode, MachineSpec, Opcode, Register, RegisterSpec, Regset, TargetFeatureSpec}, traits::{AsId, AsRawId, IdType, Name},
 };
+
+#[cfg(feature = "xva")]
+use crate::{compiler::{CompilerSpec, CompilerContext}, xva::{XvaCategory, BinaryOp, RightShiftMode, XvaOperand, XvaRegister, XvaStatement, XvaOpcode}};
 
 use crate::instr::RegisterKind;
 
@@ -258,6 +261,7 @@ macro_rules! define_x86_registers {
             }
 
             /// Extracts the category of the register class
+            #[cfg(feature = "xva")]
             pub const fn category(&self) -> crate::xva::XvaCategory {
                 match self {
                     $(Self::$class(_) => crate::xva::XvaCategory:: $category $(($($cat_tt)*))?,)*
@@ -584,6 +588,7 @@ impl RegisterSpec for X86Register {
         }
     }
 
+    #[cfg(feature = "xva")]
     fn category(&self, _: Self::MachineMode) -> crate::xva::XvaCategory {
         self.category()
     }
@@ -949,7 +954,6 @@ pub struct X86;
 
 impl MachineSpec for X86 {
     type MachineMode = X86Mode;
-    type Compiler = Self;
     type Opcode = X86Opcode;
     type Register = X86Register;
 
@@ -958,10 +962,6 @@ impl MachineSpec for X86 {
     const OPCODES: &[Opcode] = as_id_array!(X86Opcode::ALL_OPCODES => Opcode);
 
     type TargetFeature = X86TargetFeature;
-
-    fn as_compiler(&self) -> &Self::Compiler {
-        self
-    }
 
     fn name(&self) -> &'static str {
         "x86"
@@ -981,8 +981,14 @@ impl MachineSpec for X86 {
             _ => None,
         }
     }
+
+    #[cfg(feature = "xva")]
+    fn as_compiler(&self) -> Option<&dyn crate::compiler::CheckCompiler<Machine = Self>> {
+        Some(self)
+    }
 }
 
+#[cfg(feature = "xva")]
 impl X86 {
     fn opcode_for_expr(&self, dest: X86Register, dest2: Option<X86Register>, expr: &XvaOpcode) -> Option<X86Opcode>{
         match expr {
@@ -1111,6 +1117,7 @@ impl X86 {
     }
 }
 
+#[cfg(feature = "xva")]
 impl CompilerSpec for X86 {
     type Machine = Self;
 

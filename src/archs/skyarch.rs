@@ -1,9 +1,12 @@
 //! LC Skyarch ISA
-use std::range::{RangeInclusive, RangeInclusiveIter};
+use core::range::{RangeInclusive, RangeInclusiveIter};
 
 use bitflags::bitflags_match;
 
-use crate::{AsRawId, compiler::{CompilerContext, CompilerSpec}, instr::{Address, AddressKind, Instruction, Operand, RegisterKind, RelocSym}, mach::{FeatureSet, MachineSpec, ONE_MACHINE, OneMachine, Opcode, Register, RegisterSpec, Regset, TargetFeatureSpec}, traits::{AsId, BitfieldEncodable, IdType, IntoId, Name}, xva::{BinaryOp, RightShiftMode, XvaCategory, XvaOperand, XvaRegister, XvaStatement}};
+use crate::{AsRawId, instr::{Address, AddressKind, Instruction, Operand, RegisterKind, RelocSym}, mach::{FeatureSet, MachineSpec, ONE_MACHINE, OneMachine, Opcode, Register, RegisterSpec, Regset, TargetFeatureSpec}, traits::{AsId, BitfieldEncodable, IdType, IntoId, Name}};
+
+#[cfg(feature = "xva")]
+use crate::{compiler::{CompilerSpec, CompilerContext}, xva::{XvaCategory, BinaryOp, RightShiftMode, XvaOperand, XvaRegister, XvaStatement}};
 
 pub type SkyarchMachine = OneMachine;
 
@@ -383,6 +386,7 @@ impl RegisterSpec for SkyarchRegister {
         4
     }
 
+    #[cfg(feature = "xva")]
     fn category(&self, _: Self::MachineMode) -> crate::xva::XvaCategory {
         match self.map() {
             Map::GeneralPurpose => XvaCategory::Int,
@@ -1246,28 +1250,28 @@ impl MachineSpec for Skyarch {
 
     const MACH_MODES: &[crate::mach::MachineMode] = ONE_MACHINE;
 
-    type Compiler = Self;
-
     type TargetFeature = SkyarchTargetFeature;
 
     fn name(&self) -> &'static str {
         "skyarch"
     }
 
-    fn as_compiler(&self) -> &Self::Compiler {
-        self
-    }
 
     fn pretty_print_instr(&self, instr: Self::Opcode, _: Self::MachineMode, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         use core::fmt::Display as _;
         instr.decode().fmt(f)
+    }
+
+    #[cfg(feature = "xva")]
+    fn as_compiler(&self) -> Option<&dyn crate::compiler::CheckCompiler<Machine = Self>> {
+        Some(self)
     }
 }
 
 const GPRS: [SkyarchRegister; 31] = core::array::from_fn(const |v| SkyarchRegister((v as u64) + 1));
 
 
-
+#[cfg(feature = "xva")]
 impl CompilerSpec for Skyarch {
     type Machine = Self;
 

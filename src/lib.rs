@@ -36,6 +36,7 @@
     debug_closure_helpers,
     const_convert,
     formatting_options,
+    try_as_dyn,
 )]
 // #![deny(missing_docs)]
 
@@ -44,7 +45,7 @@
 pub mod macros;
 
 pub mod asm;
-pub mod compiler;
+
 pub mod instr;
 pub mod intern;
 pub mod mach;
@@ -52,6 +53,9 @@ pub mod mem;
 pub mod target;
 pub mod traits;
 
+#[cfg(feature = "xva")]
+pub mod compiler;
+#[cfg(feature = "xva")]
 pub mod xva;
 
 pub mod archs;
