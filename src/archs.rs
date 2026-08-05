@@ -33,10 +33,10 @@ macro_rules! def_features {
 
             fn feature_from_bit(bit: u32) -> Option<Self> {
                 $(
-                    #[allow(non_upper_case_globals)] 
+                    #[allow(non_upper_case_globals)]
                     const $feature_variant: u32 = <$feature_enum>::$feature_variant as u32;
                 )*
-                #[allow(non_upper_case_globals)] 
+                #[allow(non_upper_case_globals)]
                 match bit {
                     $($feature_variant => Some(Self::$feature_variant),)*
                     _ => None

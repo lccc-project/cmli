@@ -1,7 +1,13 @@
 use std::collections::HashMap;
 
 use crate::{
-    compiler::Compiler, intern::Symbol, mach::Register, xva::{XvaBasicBlock, XvaBlockBody, XvaCategory, XvaDest, XvaFunction, XvaOperand, XvaRegister, XvaStatement}
+    compiler::Compiler,
+    intern::Symbol,
+    mach::Register,
+    xva::{
+        XvaBasicBlock, XvaBlockBody, XvaCategory, XvaDest, XvaFunction, XvaOperand, XvaRegister,
+        XvaStatement,
+    },
 };
 
 #[derive(Default)]
@@ -23,7 +29,6 @@ struct RegAllocatorState<'a> {
 }
 
 impl<'a> RegAllocatorState<'a> {
-
     fn update_statement(state: &HashMap<XvaDest, Register>, stmt: &mut XvaStatement) -> bool {
         false
     }
@@ -33,13 +38,17 @@ impl<'a> RegAllocatorState<'a> {
         let mut current_reg_state = HashMap::new();
 
         let Some(block_state) = self.map.get_mut(&name) else {
-            return false
+            return false;
         };
 
         for incoming in &mut block.live_at_start {
             match incoming {
                 XvaRegister::Virtual(vreg) => {
-                    if let Some(reg) = block_state.regs.get(&*vreg).and_then(|v| v.starting_location) {
+                    if let Some(reg) = block_state
+                        .regs
+                        .get(&*vreg)
+                        .and_then(|v| v.starting_location)
+                    {
                         current_reg_state.insert(*vreg, reg);
                         *incoming = XvaRegister::Physical(reg);
                         dirty = true;
@@ -52,7 +61,6 @@ impl<'a> RegAllocatorState<'a> {
         match &mut block.body {
             XvaBlockBody::Statement(stmts) => {
                 for (n, stmt) in stmts.iter_mut().enumerate() {
-
                     dirty |= Self::update_statement(&current_reg_state, stmt);
 
                     for (&reg, loc) in &mut block_state.regs {
@@ -63,7 +71,6 @@ impl<'a> RegAllocatorState<'a> {
                 }
             }
         }
-
 
         dirty
     }
@@ -84,14 +91,17 @@ impl<'a> RegAllocatorState<'a> {
                                     }
                                 }
                             }
-                            block_locations = self.map.entry(name).or_insert_with(BlockLocations::default)
+                            block_locations =
+                                self.map.entry(name).or_insert_with(BlockLocations::default)
                         }
                         super::XvaStatement::Expr(xva_expr) => {
                             let dest = &mut xva_expr.dest;
 
                             if let XvaRegister::Virtual(v) = dest {
-                                if let Some((_, p)) =  back_prop_state.remove(&*v) {
-                                    let block_loc_info = block_locations.regs.entry(*v)
+                                if let Some((_, p)) = back_prop_state.remove(&*v) {
+                                    let block_loc_info = block_locations
+                                        .regs
+                                        .entry(*v)
                                         .or_insert_with(BlockLocationInfo::default);
                                     block_loc_info.change_posses.insert(idx, p);
                                     *dest = XvaRegister::Physical(p);
@@ -100,23 +110,21 @@ impl<'a> RegAllocatorState<'a> {
                             }
 
                             let left = match &mut xva_expr.op {
-                                super::XvaOpcode::Move(reg) => {
-                                    reg
-                                },
-                                super::XvaOpcode::BinaryOp { left, .. } |
-                                super::XvaOpcode::CheckedBinaryOp {left, .. } |
-                                super::XvaOpcode::UnaryOp { left, .. } => left,
+                                super::XvaOpcode::Move(reg) => reg,
+                                super::XvaOpcode::BinaryOp { left, .. }
+                                | super::XvaOpcode::CheckedBinaryOp { left, .. }
+                                | super::XvaOpcode::UnaryOp { left, .. } => left,
                                 _ => continue,
                             };
 
                             match (&mut *dest, &mut *left) {
                                 (XvaRegister::Virtual(v), XvaRegister::Physical(preg)) => {
-
-                                    let block_loc_info = block_locations.regs.entry(*v)
+                                    let block_loc_info = block_locations
+                                        .regs
+                                        .entry(*v)
                                         .or_insert_with(BlockLocationInfo::default);
 
-                                        block_loc_info.change_posses
-                                        .insert(idx, *preg);
+                                    block_loc_info.change_posses.insert(idx, *preg);
 
                                     *dest = *left;
                                     dirty = true;
@@ -129,18 +137,20 @@ impl<'a> RegAllocatorState<'a> {
                                 }
                                 _ => {}
                             }
-
-                        },
+                        }
                         _ => {}
                     }
                 }
-            },
+            }
         }
 
         for incoming in &mut block.live_at_start {
             if let XvaRegister::Virtual(dest) = incoming {
                 if let Some((_, preg)) = back_prop_state.remove(&*dest) {
-                    let block_loc_info = block_locations.regs.entry(*dest).or_insert_with(BlockLocationInfo::default);
+                    let block_loc_info = block_locations
+                        .regs
+                        .entry(*dest)
+                        .or_insert_with(BlockLocationInfo::default);
                     block_loc_info.starting_location = Some(preg);
                 }
             }
@@ -150,7 +160,6 @@ impl<'a> RegAllocatorState<'a> {
     }
 }
 
-
 pub struct RegAllocator<'a> {
     state: RegAllocatorState<'a>,
     func: &'a mut XvaFunction,
@@ -159,7 +168,7 @@ pub struct RegAllocator<'a> {
 impl<'a> RegAllocator<'a> {
     pub fn new(compiler: &'a dyn Compiler, func: &'a mut XvaFunction) -> Self {
         Self {
-            state: RegAllocatorState { 
+            state: RegAllocatorState {
                 compiler,
                 stack_slots: HashMap::new(),
                 map: HashMap::new(),
@@ -184,7 +193,6 @@ impl<'a> RegAllocator<'a> {
     }
 
     pub fn process_function(&mut self) {
-       
         loop {
             let mut dirty = false;
             loop {
@@ -193,15 +201,14 @@ impl<'a> RegAllocator<'a> {
                 p1dirty |= self.process_phase1();
                 dirty |= p1dirty;
 
-
                 if !p1dirty {
-                    break
+                    break;
                 }
             }
 
             if !dirty {
-                break
-            }    
+                break;
+            }
         }
     }
 }

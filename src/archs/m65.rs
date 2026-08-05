@@ -1,6 +1,16 @@
-use std::{hash::Hash, marker::{PhantomData, ConstParamTy}};
+use std::{
+    hash::Hash,
+    marker::{ConstParamTy, PhantomData},
+};
 
-use crate::{instr::RegisterKind, mach::{Machine, MachineMode, MachineSpec, OneMachine, Opcode, Register, RegisterSpec, Regset, TargetFeatureSpec}, traits::{AsId, AsRawId, Name}};
+use crate::{
+    instr::RegisterKind,
+    mach::{
+        Machine, MachineMode, MachineSpec, OneMachine, Opcode, Register, RegisterSpec, Regset,
+        TargetFeatureSpec,
+    },
+    traits::{AsId, AsRawId, Name},
+};
 
 #[cfg(feature = "xva")]
 use crate::{compiler::CompilerSpec, xva::XvaCategory};
@@ -8,7 +18,7 @@ use crate::{compiler::CompilerSpec, xva::XvaCategory};
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, AsRawId)]
 pub struct W65Mode(u32);
 
-impl const AsId<MachineMode> for W65Mode {}
+const impl AsId<MachineMode> for W65Mode {}
 
 impl Name for W65Mode {
     fn name(&self) -> &'static str {
@@ -49,7 +59,7 @@ impl M65Kind {
     }
 }
 
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq,AsRawId)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, AsRawId)]
 pub enum M65Register<const Kind: M65Kind> {
     A,
     X,
@@ -58,35 +68,59 @@ pub enum M65Register<const Kind: M65Kind> {
 
     R(u8),
     Rw(u8),
-    
 
     // w65 only registers
     B,
     D,
     K,
-
 }
 
 impl<const Kind: M65Kind> M65Register<Kind> {
-    const ALL_REGISTERS: [Self; 31] = [Self::A, Self::X, Self::Y, Self::S, Self::B, Self::D, Self::K, 
-        Self::R(0), Self::R(1), Self::R(2), Self::R(3), Self::R(4), Self::R(5), Self::R(6), Self::R(7),
-        Self::Rw(0), Self::Rw(1), Self::Rw(2), Self::Rw(3), Self::Rw(4), Self::Rw(5), Self::Rw(6), Self::Rw(7),
-        Self::Rw(8), Self::Rw(9), Self::Rw(10), Self::Rw(11), Self::Rw(12), Self::Rw(13), Self::Rw(14), Self::Rw(15),
+    const ALL_REGISTERS: [Self; 31] = [
+        Self::A,
+        Self::X,
+        Self::Y,
+        Self::S,
+        Self::B,
+        Self::D,
+        Self::K,
+        Self::R(0),
+        Self::R(1),
+        Self::R(2),
+        Self::R(3),
+        Self::R(4),
+        Self::R(5),
+        Self::R(6),
+        Self::R(7),
+        Self::Rw(0),
+        Self::Rw(1),
+        Self::Rw(2),
+        Self::Rw(3),
+        Self::Rw(4),
+        Self::Rw(5),
+        Self::Rw(6),
+        Self::Rw(7),
+        Self::Rw(8),
+        Self::Rw(9),
+        Self::Rw(10),
+        Self::Rw(11),
+        Self::Rw(12),
+        Self::Rw(13),
+        Self::Rw(14),
+        Self::Rw(15),
     ];
 }
 
 impl<const Kind: M65Kind> M65Register<Kind> {
     pub const fn kind(&self) -> RegisterKind {
         match self {
-            M65Register::X |
-            M65Register::Y  |
-            M65Register::R(_) |
-            M65Register::Rw(_) |
-            M65Register::A => RegisterKind::GeneralPurpose,
-            M65Register::S |
-            M65Register::D => RegisterKind::AddressOnly,
-            M65Register::B |
-            M65Register::K => RegisterKind::AddressSegment,
+            M65Register::X
+            | M65Register::Y
+            | M65Register::R(_)
+            | M65Register::Rw(_)
+            | M65Register::A => RegisterKind::GeneralPurpose,
+            M65Register::S | M65Register::D => RegisterKind::AddressOnly,
+            M65Register::B | M65Register::K => RegisterKind::AddressSegment,
         }
     }
 }
@@ -107,22 +141,19 @@ impl<const Kind: M65Kind> Name for M65Register<Kind> {
     }
 }
 
-impl<const Kind: M65Kind> const AsId<Register> for M65Register<Kind> {}
-
-
+const impl<const Kind: M65Kind> AsId<Register> for M65Register<Kind> {}
 
 impl<const Kind: M65Kind> RegisterSpec for M65Register<Kind> {
     type MachineMode = W65Mode;
-    
+
     fn kind(&self) -> crate::instr::RegisterKind {
         self.kind()
     }
-    
+
     fn size(&self, mode: Self::MachineMode) -> u32 {
         match self {
             M65Register::A => Kind.accum_size(mode),
-            M65Register::X |
-            M65Register::Y => Kind.index_size(mode),
+            M65Register::X | M65Register::Y => Kind.index_size(mode),
             M65Register::S => Kind.gptr_size(),
             M65Register::R(_) => 4,
             M65Register::Rw(_) => 2,
@@ -131,34 +162,35 @@ impl<const Kind: M65Kind> RegisterSpec for M65Register<Kind> {
             M65Register::K => 1,
         }
     }
-    
+
     #[cfg(feature = "xva")]
     fn category(&self, mode: Self::MachineMode) -> crate::xva::XvaCategory {
         match self.kind() {
             RegisterKind::GeneralPurpose => XvaCategory::Int,
-            kind => XvaCategory::Custom(kind)
+            kind => XvaCategory::Custom(kind),
         }
     }
-    
+
     fn overlaps(&self, other: &Self) -> bool {
         match (self, other) {
-            (a,b) if a==b => true,
-            (M65Register::R(rn), M65Register::Rw(wn))|(M65Register::Rw(wn), M65Register::R(rn)) => *rn == (*wn >> 1),
+            (a, b) if a == b => true,
+            (M65Register::R(rn), M65Register::Rw(wn))
+            | (M65Register::Rw(wn), M65Register::R(rn)) => *rn == (*wn >> 1),
             _ => false,
         }
     }
-    
+
     fn from_bit(bit: u32, _: Self::MachineMode) -> Option<Self> {
         match bit {
             0 => Some(Self::A),
             1 => Some(Self::X),
             2 => Some(Self::Y),
-            v @ (8..16) => Some(Self::R((v&7) as u8)),
+            v @ (8..16) => Some(Self::R((v & 7) as u8)),
             v @ 16..32 => Some(Self::Rw((v & 15) as u8)),
-            _ => None
+            _ => None,
         }
     }
-    
+
     fn regmap_bit(self) -> Option<u32> {
         match self {
             Self::A => Some(0),
@@ -166,18 +198,24 @@ impl<const Kind: M65Kind> RegisterSpec for M65Register<Kind> {
             Self::Y => Some(2),
             Self::R(v) => Some(8 | v as u32),
             Self::Rw(v) => Some(16 | v as u32),
-            _ => None
+            _ => None,
         }
     }
-    
-    fn supported_registers(_: &crate::mach::FeatureSet, _: Self::MachineMode) -> crate::mach::Regset {
-        Regset::from_registers(core::iter::chain([Self::A, Self::X, Self::Y, Self::S], (0..8).map(Self::R))
-            .chain((0..16).map(Self::Rw))
-            .chain([Self::K, Self::D, Self::B].into_iter().filter(|_| const { Kind.has_w65() }))
+
+    fn supported_registers(
+        _: &crate::mach::FeatureSet,
+        _: Self::MachineMode,
+    ) -> crate::mach::Regset {
+        Regset::from_registers(
+            core::iter::chain([Self::A, Self::X, Self::Y, Self::S], (0..8).map(Self::R))
+                .chain((0..16).map(Self::Rw))
+                .chain(
+                    [Self::K, Self::D, Self::B]
+                        .into_iter()
+                        .filter(|_| const { Kind.has_w65() }),
+                ),
         )
     }
-
-    
 }
 
 macro_rules! m65_instructions {
@@ -194,8 +232,8 @@ macro_rules! m65_instructions {
         $(#[$meta])*
         $vis enum $name <const $kind: $ty>{
             $(
-                #[doc = ::core::concat!("The `", $mnemonic, "` instruction")]  
-                $(#[$instr_meta])* 
+                #[doc = ::core::concat!("The `", $mnemonic, "` instruction")]
+                $(#[$instr_meta])*
                 $instr_name
             ),*
         }
@@ -204,7 +242,7 @@ macro_rules! m65_instructions {
             const ALL_OPCODES: [Self; ${count($instr_name)}] = [$(Self::$instr_name),*];
         }
 
-        impl <const $kind: $ty> const $crate::traits::AsId<$crate::mach::Opcode> for $name <$kind> {}
+        const impl <const $kind: $ty> $crate::traits::AsId<$crate::mach::Opcode> for $name <$kind> {}
 
         impl<const $kind: $ty> $crate::traits::Name for $name <$kind> {
             fn name(&self) -> &'static str {
@@ -236,7 +274,6 @@ pub enum M65Operand {
     Immediate(ImmediateSize),
     Abs(IndexReg),
     Abs24,
-
 }
 
 m65_instructions! {
@@ -248,7 +285,7 @@ m65_instructions! {
     }
 }
 
-type W65Opcode = M65Opcode<{M65Kind::W65}>;
+type W65Opcode = M65Opcode<{ M65Kind::W65 }>;
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, Name)]
 pub enum M65TargetFeature {}
@@ -282,9 +319,7 @@ impl<const Kind: M65Kind> MachineSpec for M65Machine<Kind> {
 
     const MACH_MODES: &[MachineMode] = as_id_array!([W65Mode(0o0), W65Mode(0o1), W65Mode(0o2), W65Mode(0o3), W65Mode(0o7)] => MachineMode);
 
-
     type TargetFeature = M65TargetFeature;
-
 
     fn name(&self) -> &'static str {
         match Kind {
@@ -294,8 +329,7 @@ impl<const Kind: M65Kind> MachineSpec for M65Machine<Kind> {
     }
 
     #[cfg(feature = "xva")]
-    fn as_compiler(&self) -> Option<&dyn crate::compiler::CheckCompiler<Machine=Self>> {
+    fn as_compiler(&self) -> Option<&dyn crate::compiler::CheckCompiler<Machine = Self>> {
         core::any::try_as_dyn(self)
     }
 }
-

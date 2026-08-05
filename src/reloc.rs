@@ -1,7 +1,6 @@
 use crate::{IdType, intern::Symbol};
 use core::num::NonZero;
 
-
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, Default)]
 pub enum OverflowKind {
     #[default]
@@ -31,7 +30,7 @@ impl RelocSpan {
             pcrel_offset: 0,
             bit_shift: 0,
             overflow_kind: OverflowKind::None,
-            __non_exhaustive: ()
+            __non_exhaustive: (),
         }
     }
 }

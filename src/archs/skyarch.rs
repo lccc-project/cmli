@@ -3,16 +3,27 @@ use core::range::{RangeInclusive, RangeInclusiveIter};
 
 use bitflags::bitflags_match;
 
-use crate::{AsRawId, instr::{Address, AddressKind, Instruction, Operand, RegisterKind, RelocSym}, mach::{FeatureSet, MachineSpec, ONE_MACHINE, OneMachine, Opcode, Register, RegisterSpec, Regset, TargetFeatureSpec}, traits::{AsId, BitfieldEncodable, IdType, IntoId, Name}};
+use crate::{
+    AsRawId,
+    instr::{Address, AddressKind, Instruction, Operand, RegisterKind, RelocSym},
+    mach::{
+        FeatureSet, MachineSpec, ONE_MACHINE, OneMachine, Opcode, Register, RegisterSpec, Regset,
+        TargetFeatureSpec,
+    },
+    traits::{AsId, BitfieldEncodable, IdType, IntoId, Name},
+};
 
 #[cfg(feature = "xva")]
-use crate::{compiler::{CompilerSpec, CompilerContext}, xva::{XvaCategory, BinaryOp, RightShiftMode, XvaOperand, XvaRegister, XvaStatement}};
+use crate::{
+    compiler::{CompilerContext, CompilerSpec},
+    xva::{BinaryOp, RightShiftMode, XvaCategory, XvaOperand, XvaRegister, XvaStatement},
+};
 
 pub type SkyarchMachine = OneMachine;
 
 #[repr(u8)]
 #[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-enum SkyarchCoprocInner{
+enum SkyarchCoprocInner {
     _0,
     _1,
     _2,
@@ -20,7 +31,7 @@ enum SkyarchCoprocInner{
     _4,
     _5,
     _6,
-    _7
+    _7,
 }
 
 impl core::fmt::Debug for SkyarchCoprocInner {
@@ -33,11 +44,11 @@ impl core::fmt::Debug for SkyarchCoprocInner {
 #[repr(transparent)]
 pub struct SkyarchCoprocessor(SkyarchCoprocInner);
 
-impl const BitfieldEncodable for SkyarchCoprocessor {
+const impl BitfieldEncodable for SkyarchCoprocessor {
     const MAX_WIDTH: u32 = 3;
 
     fn decode_bits(val: u128, w: u32) -> Self {
-        unsafe { SkyarchCoprocessor::new_unchecked((val & 7) as u8)}
+        unsafe { SkyarchCoprocessor::new_unchecked((val & 7) as u8) }
     }
 
     fn encode_bits(&self) -> u128 {
@@ -48,13 +59,15 @@ impl const BitfieldEncodable for SkyarchCoprocessor {
 impl SkyarchCoprocessor {
     pub const NUM_COPROC: u8 = 8;
     pub const unsafe fn new_unchecked(val: u8) -> Self {
-        unsafe { core::hint::assert_unchecked(val < Self::NUM_COPROC); }
-        unsafe { core::mem::transmute(val)}
+        unsafe {
+            core::hint::assert_unchecked(val < Self::NUM_COPROC);
+        }
+        unsafe { core::mem::transmute(val) }
     }
 
     pub const fn new(val: u8) -> Option<Self> {
         if val < Self::NUM_COPROC {
-            Some(unsafe{Self::new_unchecked(val)})
+            Some(unsafe { Self::new_unchecked(val) })
         } else {
             None
         }
@@ -69,7 +82,7 @@ impl SkyarchCoprocessor {
 
 #[repr(u8)]
 #[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-enum SkyarchRegnoInner{
+enum SkyarchRegnoInner {
     _0,
     _1,
     _2,
@@ -110,12 +123,11 @@ impl core::fmt::Debug for SkyarchRegnoInner {
     }
 }
 
-
 #[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
 #[repr(transparent)]
 pub struct SkyarchRegno(SkyarchRegnoInner);
 
-impl const BitfieldEncodable for SkyarchRegno {
+const impl BitfieldEncodable for SkyarchRegno {
     const MAX_WIDTH: u32 = 5;
 
     fn encode_bits(&self) -> u128 {
@@ -130,13 +142,15 @@ impl const BitfieldEncodable for SkyarchRegno {
 impl SkyarchRegno {
     pub const NUM_REGISTERS: u8 = 32;
     pub const unsafe fn new_unchecked(val: u8) -> Self {
-        unsafe { core::hint::assert_unchecked(val < Self::NUM_REGISTERS); }
-        unsafe { core::mem::transmute(val)}
+        unsafe {
+            core::hint::assert_unchecked(val < Self::NUM_REGISTERS);
+        }
+        unsafe { core::mem::transmute(val) }
     }
 
     pub const fn new(val: u8) -> Option<Self> {
         if val < Self::NUM_REGISTERS {
-            Some(unsafe{Self::new_unchecked(val)})
+            Some(unsafe { Self::new_unchecked(val) })
         } else {
             None
         }
@@ -153,7 +167,6 @@ impl SkyarchRegno {
     }
 }
 
-
 #[macro_export]
 macro_rules! skyarch_regno {
     ($e:expr) => {
@@ -163,7 +176,7 @@ macro_rules! skyarch_regno {
 
             unsafe { $crate::archs::skyarch::SkyarchRegno::new_unchecked(val) }
         }
-    }
+    };
 }
 
 #[allow(non_upper_case_globals)]
@@ -176,15 +189,20 @@ impl SkyarchRegno {
 
 pub struct Skyarch;
 
-pub struct SkyarchRegRangeIter{
+pub struct SkyarchRegRangeIter {
     range: RangeInclusiveIter<u8>,
 }
 
 impl SkyarchRegRangeIter {
     pub fn from_range(range: RangeInclusive<SkyarchRegno>) -> Self {
-        let range = RangeInclusive{start: range.start.get(), last: range.last.get()};
+        let range = RangeInclusive {
+            start: range.start.get(),
+            last: range.last.get(),
+        };
 
-        Self{range: range.into_iter()}
+        Self {
+            range: range.into_iter(),
+        }
     }
 }
 
@@ -192,8 +210,9 @@ impl Iterator for SkyarchRegRangeIter {
     type Item = SkyarchRegno;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.range.next()
-            .map(|v| unsafe { SkyarchRegno::new_unchecked(v)})
+        self.range
+            .next()
+            .map(|v| unsafe { SkyarchRegno::new_unchecked(v) })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -215,9 +234,10 @@ impl SkyarchRegister {
     pub const r31: SkyarchRegister = SkyarchRegister(31);
 }
 
-pub const REGISTERS: [SkyarchRegister; 16 * 32] = core::array::from_fn(const |n| SkyarchRegister(n as u64));
+pub const REGISTERS: [SkyarchRegister; 16 * 32] =
+    core::array::from_fn(const |n| SkyarchRegister(n as u64));
 
-impl const AsId<Register> for SkyarchRegister {}
+const impl AsId<Register> for SkyarchRegister {}
 
 #[repr(u8)]
 #[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -229,13 +249,13 @@ pub enum SkyarchByteSize {
     __ReservedDouble,
 }
 
-impl const BitfieldEncodable for SkyarchByteSize {
+const impl BitfieldEncodable for SkyarchByteSize {
     const MAX_WIDTH: u32 = 2;
-    
+
     fn encode_bits(&self) -> u128 {
         *self as u128
     }
-    
+
     fn decode_bits(val: u128, _: u32) -> Self {
         match val {
             0 => Self::Byte,
@@ -270,10 +290,10 @@ pub enum Map {
     __UnusedMap6,
     #[doc(hidden)]
     __UnusedMap7,
-    Coprocessor(SkyarchCoprocessor)
+    Coprocessor(SkyarchCoprocessor),
 }
 
-impl const BitfieldEncodable for Map {
+const impl BitfieldEncodable for Map {
     const MAX_WIDTH: u32 = 4;
 
     fn encode_bits(&self) -> u128 {
@@ -287,7 +307,7 @@ impl const BitfieldEncodable for Map {
 
 impl Map {
     pub const fn from_mapno(val: u8) -> Self {
-         match val {
+        match val {
             0 => Map::GeneralPurpose,
             1 => Map::SystemControl,
             2 => Map::Io,
@@ -297,7 +317,7 @@ impl Map {
             6 => Map::__UnusedMap6,
             7 => Map::__UnusedMap7,
             map @ 8..16 => Map::Coprocessor(unsafe { SkyarchCoprocessor::new_unchecked(map - 8) }),
-            _ => panic!("Unknown register number")
+            _ => panic!("Unknown register number"),
         }
     }
 
@@ -308,7 +328,7 @@ impl Map {
             Map::Io => 2,
             Map::SystemInfo => 3,
             Map::CoprocessorControl => 4,
-            Map::Coprocessor(coproc) => coproc.get()+8,
+            Map::Coprocessor(coproc) => coproc.get() + 8,
             Map::__UnusedMap5 => 5,
             Map::__UnusedMap6 => 6,
             Map::__UnusedMap7 => 7,
@@ -345,7 +365,7 @@ impl Name for SkyarchRegister {
             Map::CoprocessorControl => match regno {
                 30 => "coe",
                 31 => "cop",
-                _ => regno_to_static_name!(regno => "cctl")
+                _ => regno_to_static_name!(regno => "cctl"),
             },
             Map::Coprocessor(n) => match n.0 {
                 SkyarchCoprocInner::_0 => regno_to_static_name!(regno => "c0r"),
@@ -357,13 +377,12 @@ impl Name for SkyarchRegister {
                 SkyarchCoprocInner::_6 => regno_to_static_name!(regno => "c6r"),
                 SkyarchCoprocInner::_7 => regno_to_static_name!(regno => "c7r"),
             },
-            _ => "**UNKNOWN REGISTER**"
+            _ => "**UNKNOWN REGISTER**",
         }
     }
 }
 
 impl RegisterSpec for SkyarchRegister {
-    
     type MachineMode = SkyarchMachine;
 
     fn kind(&self) -> RegisterKind {
@@ -374,12 +393,16 @@ impl RegisterSpec for SkyarchRegister {
             Map::SystemInfo => RegisterKind::System,
             Map::CoprocessorControl => RegisterKind::System,
             Map::Coprocessor(_) => RegisterKind::Special,
-            _ => RegisterKind::System
+            _ => RegisterKind::System,
         }
     }
 
     fn supported_registers(features: &FeatureSet, _: Self::MachineMode) -> crate::mach::Regset {
-        Regset::from_registers((1..32).map(SkyarchRegister).chain((0..32).map(|v| SkyarchRegister((2 << 5) | v))))
+        Regset::from_registers(
+            (1..32)
+                .map(SkyarchRegister)
+                .chain((0..32).map(|v| SkyarchRegister((2 << 5) | v))),
+        )
     }
 
     fn size(&self, _: Self::MachineMode) -> u32 {
@@ -390,7 +413,7 @@ impl RegisterSpec for SkyarchRegister {
     fn category(&self, _: Self::MachineMode) -> crate::xva::XvaCategory {
         match self.map() {
             Map::GeneralPurpose => XvaCategory::Int,
-            _ => XvaCategory::Custom(self.kind())
+            _ => XvaCategory::Custom(self.kind()),
         }
     }
 
@@ -427,15 +450,14 @@ impl SkyarchRegister {
     }
 
     pub const fn map(&self) -> Map {
-       Map::from_mapno(((self.0 >> 5) & 15) as u8)
+        Map::from_mapno(((self.0 >> 5) & 15) as u8)
     }
 }
 
 #[derive(AsRawId, Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct SkyarchOpcode(u64);
 
-impl const AsId<Opcode> for SkyarchOpcode{}
-
+const impl AsId<Opcode> for SkyarchOpcode {}
 
 macro_rules! skyarch_opcodes {
     (#is_synthetic true) => {
@@ -471,7 +493,7 @@ macro_rules! skyarch_opcodes {
                                     let width = const {
                                         let width = ($($pwidth,)? <$pty as BitfieldEncodable>::MAX_WIDTH,).0;
 
-                                        assert!(width <= <$pty as BitfieldEncodable>::MAX_WIDTH, 
+                                        assert!(width <= <$pty as BitfieldEncodable>::MAX_WIDTH,
                                             ::core::concat!("Width of primary ", ::core::stringify!($primary), " (", $(::core::stringify!($pwidth),)? ") exceeds width of type")
                                         );
 
@@ -490,7 +512,7 @@ macro_rules! skyarch_opcodes {
                                         let width = end - base;
 
 
-                                        assert!(width <= <$ty as BitfieldEncodable>::MAX_WIDTH, 
+                                        assert!(width <= <$ty as BitfieldEncodable>::MAX_WIDTH,
                                                 ::core::concat!("Range of field", ::core::stringify!($field), " (", ::core::stringify!($base), $("..", $(::core::stringify!($end),)?)? ") exceeds width of type")
                                             );
 
@@ -525,7 +547,7 @@ macro_rules! skyarch_opcodes {
                             let width = const {
                                 let width = ($($pwidth,)? <$pty as BitfieldEncodable>::MAX_WIDTH,).0;
 
-                                assert!(width <= <$pty as BitfieldEncodable>::MAX_WIDTH, 
+                                assert!(width <= <$pty as BitfieldEncodable>::MAX_WIDTH,
                                     ::core::concat!("Width of primary ", ::core::stringify!($primary), " (", $(::core::stringify!($pwidth),)? ") exceeds width of type")
                                 );
 
@@ -542,7 +564,7 @@ macro_rules! skyarch_opcodes {
                                 let width = end - base;
 
 
-                                assert!(width <= <$ty as BitfieldEncodable>::MAX_WIDTH, 
+                                assert!(width <= <$ty as BitfieldEncodable>::MAX_WIDTH,
                                         ::core::concat!("Range of field", ::core::stringify!($field), " (", ::core::stringify!($base), $("..", $(::core::stringify!($end),)?)? ") exceeds width of type")
                                     );
 
@@ -571,7 +593,14 @@ impl core::fmt::Display for SkyarchInstruction {
         match self {
             SkyarchInstruction::Und00 => f.write_str("und"),
             SkyarchInstruction::Pause { k } => f.write_fmt(format_args!("pause {k}")),
-            SkyarchInstruction::Mov { dest, ssrc, latency, cond, dir, map } => {
+            SkyarchInstruction::Mov {
+                dest,
+                ssrc,
+                latency,
+                cond,
+                dir,
+                map,
+            } => {
                 let (srcmap, destmap) = if *dir {
                     (Map::GeneralPurpose, *map)
                 } else {
@@ -593,8 +622,13 @@ impl core::fmt::Display for SkyarchInstruction {
                 f.write_str(destr.name())?;
                 f.write_str(", ")?;
                 f.write_str(srcr.name())
-            },
-            SkyarchInstruction::Ld { dest, src, width, mode } => {
+            }
+            SkyarchInstruction::Ld {
+                dest,
+                src,
+                width,
+                mode,
+            } => {
                 match mode {
                     SkyarchLoadStoreMode::PostInc => f.write_str("pop ")?,
                     SkyarchLoadStoreMode::PreDec => f.write_str("lddec ")?,
@@ -611,8 +645,13 @@ impl core::fmt::Display for SkyarchInstruction {
                 f.write_str(", ")?;
 
                 width.fmt(f)
-            },
-            SkyarchInstruction::St { dest, src, width, mode } => {
+            }
+            SkyarchInstruction::St {
+                dest,
+                src,
+                width,
+                mode,
+            } => {
                 match mode {
                     SkyarchLoadStoreMode::PostInc => f.write_str("stinc ")?,
                     SkyarchLoadStoreMode::PreDec => f.write_str("push ")?,
@@ -629,31 +668,31 @@ impl core::fmt::Display for SkyarchInstruction {
                 f.write_str(", ")?;
 
                 width.fmt(f)
-            },
+            }
             SkyarchInstruction::Ldi { dest, signed, imm } => {
                 let dest = dest.gpr();
                 f.write_str("ldi ")?;
                 dest.fmt(f)?;
                 f.write_str(", ")?;
-                if *signed  {
+                if *signed {
                     imm.fmt(f)
                 } else {
                     let imm = *imm as u16;
                     imm.fmt(f)
                 }
-            },
+            }
             SkyarchInstruction::Lra { dest, signed, imm } => {
                 let dest = dest.gpr();
                 f.write_str("lra ")?;
                 dest.fmt(f)?;
                 f.write_str(", ")?;
-                if *signed  {
+                if *signed {
                     imm.fmt(f)
                 } else {
                     let imm = *imm as u16;
                     imm.fmt(f)
                 }
-            },
+            }
             SkyarchInstruction::Xchg { reg1, reg2 } => {
                 let reg1 = reg1.gpr();
                 let reg2 = reg2.gpr();
@@ -662,8 +701,14 @@ impl core::fmt::Display for SkyarchInstruction {
                 reg1.fmt(f)?;
                 f.write_str(", ")?;
                 reg2.fmt(f)
-            },
-            SkyarchInstruction::Addi { dest, signed, supress_flags, higher_half, imm } => {
+            }
+            SkyarchInstruction::Addi {
+                dest,
+                signed,
+                supress_flags,
+                higher_half,
+                imm,
+            } => {
                 let dest = dest.gpr();
                 f.write_str("addi")?;
                 if *supress_flags {
@@ -675,14 +720,21 @@ impl core::fmt::Display for SkyarchInstruction {
                 f.write_str(" ")?;
                 dest.fmt(f)?;
                 f.write_str(", ")?;
-                if *signed  {
+                if *signed {
                     imm.fmt(f)
                 } else {
                     let imm = *imm as u16;
                     imm.fmt(f)
                 }
-            },
-            SkyarchInstruction::Add { dest, src1, src2, supress_flags, shift, shift_polarity } => {
+            }
+            SkyarchInstruction::Add {
+                dest,
+                src1,
+                src2,
+                supress_flags,
+                shift,
+                shift_polarity,
+            } => {
                 f.write_str("add")?;
                 if *supress_flags {
                     f.write_str("c")?;
@@ -711,7 +763,6 @@ impl core::fmt::Display for SkyarchInstruction {
                 }
                 f.write_str(", ")?;
 
-
                 src2.fmt(f)?;
 
                 if src2q > 0 {
@@ -720,8 +771,15 @@ impl core::fmt::Display for SkyarchInstruction {
                 }
 
                 Ok(())
-            },
-            SkyarchInstruction::Sub { dest, src1, src2, supress_flags, shift, shift_polarity } => {
+            }
+            SkyarchInstruction::Sub {
+                dest,
+                src1,
+                src2,
+                supress_flags,
+                shift,
+                shift_polarity,
+            } => {
                 f.write_str("sub")?;
                 if *supress_flags {
                     f.write_str("c")?;
@@ -750,7 +808,6 @@ impl core::fmt::Display for SkyarchInstruction {
                 }
                 f.write_str(", ")?;
 
-
                 src2.fmt(f)?;
 
                 if src2q > 0 {
@@ -759,8 +816,16 @@ impl core::fmt::Display for SkyarchInstruction {
                 }
 
                 Ok(())
-            },
-            SkyarchInstruction::And { dest, src1, src2, supress_flags, shift, shift_polarity, invert } => {
+            }
+            SkyarchInstruction::And {
+                dest,
+                src1,
+                src2,
+                supress_flags,
+                shift,
+                shift_polarity,
+                invert,
+            } => {
                 f.write_str("and")?;
                 if *supress_flags {
                     f.write_str("c")?;
@@ -807,8 +872,16 @@ impl core::fmt::Display for SkyarchInstruction {
                 }
 
                 Ok(())
-            },
-            SkyarchInstruction::Or { dest, src1, src2, supress_flags, shift, shift_polarity, invert } => {
+            }
+            SkyarchInstruction::Or {
+                dest,
+                src1,
+                src2,
+                supress_flags,
+                shift,
+                shift_polarity,
+                invert,
+            } => {
                 f.write_str("or")?;
                 if *supress_flags {
                     f.write_str("c")?;
@@ -855,8 +928,16 @@ impl core::fmt::Display for SkyarchInstruction {
                 }
 
                 Ok(())
-            },
-            SkyarchInstruction::Xor { dest, src1, src2, supress_flags, shift, shift_polarity, invert } => {
+            }
+            SkyarchInstruction::Xor {
+                dest,
+                src1,
+                src2,
+                supress_flags,
+                shift,
+                shift_polarity,
+                invert,
+            } => {
                 f.write_str("xor")?;
                 if *supress_flags {
                     f.write_str("c")?;
@@ -903,9 +984,25 @@ impl core::fmt::Display for SkyarchInstruction {
                 }
 
                 Ok(())
-            },
-            SkyarchInstruction::Fsl { dest, value, quantity, supress_flags, invert_sign, wrap_quantity, remainder } => todo!(),
-            SkyarchInstruction::Fsr { dest, value, quantity, supress_flags, invert_sign, wrap_quantity, remainder } => todo!(),
+            }
+            SkyarchInstruction::Fsl {
+                dest,
+                value,
+                quantity,
+                supress_flags,
+                invert_sign,
+                wrap_quantity,
+                remainder,
+            } => todo!(),
+            SkyarchInstruction::Fsr {
+                dest,
+                value,
+                quantity,
+                supress_flags,
+                invert_sign,
+                wrap_quantity,
+                remainder,
+            } => todo!(),
             SkyarchInstruction::Jmp { cond, link, offset } => {
                 f.write_str("jmp")?;
 
@@ -921,7 +1018,7 @@ impl core::fmt::Display for SkyarchInstruction {
                 let off = *offset << 2;
 
                 off.fmt(f)
-            },
+            }
             SkyarchInstruction::Jmpr { cond, link, dest } => {
                 f.write_str("jmpr")?;
 
@@ -934,7 +1031,7 @@ impl core::fmt::Display for SkyarchInstruction {
                 link.fmt(f)?;
                 f.write_str(", ")?;
                 dest.fmt(f)
-            },
+            }
             SkyarchInstruction::In { dest, port, width } => {
                 f.write_str("in ")?;
                 let dest = dest.gpr();
@@ -946,7 +1043,7 @@ impl core::fmt::Display for SkyarchInstruction {
                 port.fmt(f)?;
                 f.write_str(", ")?;
                 width.fmt(f)
-            },
+            }
             SkyarchInstruction::Out { src, port, width } => {
                 f.write_str("out ")?;
                 let dest = src.gpr();
@@ -958,7 +1055,7 @@ impl core::fmt::Display for SkyarchInstruction {
                 port.fmt(f)?;
                 f.write_str(", ")?;
                 width.fmt(f)
-            },
+            }
             SkyarchInstruction::Ldflags { dest, mask } => {
                 f.write_str("ldflags ")?;
                 let dest = dest.gpr();
@@ -968,7 +1065,7 @@ impl core::fmt::Display for SkyarchInstruction {
                 f.write_str(", ")?;
 
                 mask.fmt(f)
-            },
+            }
             SkyarchInstruction::Stflags { src, mask } => {
                 f.write_str("stflags ")?;
                 let dest = src.gpr();
@@ -978,9 +1075,13 @@ impl core::fmt::Display for SkyarchInstruction {
                 f.write_str(", ")?;
 
                 mask.fmt(f)
-            },
+            }
             SkyarchInstruction::Xvp => f.write_str("xvp"),
-            SkyarchInstruction::Cpi { coproc, func, payload } => {
+            SkyarchInstruction::Cpi {
+                coproc,
+                func,
+                payload,
+            } => {
                 let n = coproc.get();
                 f.write_str("cpi")?;
                 n.fmt(f)?;
@@ -988,8 +1089,12 @@ impl core::fmt::Display for SkyarchInstruction {
                 f.write_str(" ")?;
 
                 f.write_fmt(format_args!("{func:#04X}, {payload:#08}"))
-            },
-            SkyarchInstruction::Ncpi { coproc, func, payload } => {
+            }
+            SkyarchInstruction::Ncpi {
+                coproc,
+                func,
+                payload,
+            } => {
                 let n = coproc.get();
                 f.write_str("ncpi")?;
                 n.fmt(f)?;
@@ -997,8 +1102,12 @@ impl core::fmt::Display for SkyarchInstruction {
                 f.write_str(" ")?;
 
                 f.write_fmt(format_args!("{func:#03X}, {payload:#08}"))
-            },
-            SkyarchInstruction::CpiEf { coproc, func, payload } => {
+            }
+            SkyarchInstruction::CpiEf {
+                coproc,
+                func,
+                payload,
+            } => {
                 let n = coproc.get();
                 f.write_str("cpi")?;
                 n.fmt(f)?;
@@ -1006,8 +1115,12 @@ impl core::fmt::Display for SkyarchInstruction {
                 f.write_str("ef ")?;
 
                 f.write_fmt(format_args!("{func:#04X}, {payload:#08}"))
-            },
-            SkyarchInstruction::NcpiEf { coproc, func, payload } => {
+            }
+            SkyarchInstruction::NcpiEf {
+                coproc,
+                func,
+                payload,
+            } => {
                 let n = coproc.get();
                 f.write_str("ncpi")?;
                 n.fmt(f)?;
@@ -1015,7 +1128,7 @@ impl core::fmt::Display for SkyarchInstruction {
                 f.write_str("ef ")?;
 
                 f.write_fmt(format_args!("{func:#04X}, {payload:#08}"))
-            },
+            }
             SkyarchInstruction::UndFF => f.write_str("und"),
             SkyarchInstruction::InvalidEncoding => f.write_str("und"),
             SkyarchInstruction::LdiW { dest, signed } => {
@@ -1023,14 +1136,19 @@ impl core::fmt::Display for SkyarchInstruction {
                 f.write_str("ldi ")?;
                 dest.fmt(f)?;
                 f.write_str(", ")
-            },
+            }
             SkyarchInstruction::LraW { dest, signed } => {
                 let dest = dest.gpr();
                 f.write_str("lra ")?;
                 dest.fmt(f)?;
                 f.write_str(", ")
-            },
-            SkyarchInstruction::AddiW { dest, signed, supress_flags, higher_half } => {
+            }
+            SkyarchInstruction::AddiW {
+                dest,
+                signed,
+                supress_flags,
+                higher_half,
+            } => {
                 let dest = dest.gpr();
                 f.write_str("addi")?;
                 if *supress_flags {
@@ -1042,12 +1160,11 @@ impl core::fmt::Display for SkyarchInstruction {
                 f.write_str(" ")?;
                 dest.fmt(f)?;
                 f.write_str(", ")
-            },
+            }
             SkyarchInstruction::JmpW { cond, link, dest } => {
                 f.write_str("jmpw")?;
 
                 cond.fmt(f)?;
-
 
                 f.write_str(" ")?;
 
@@ -1058,7 +1175,7 @@ impl core::fmt::Display for SkyarchInstruction {
                 f.write_str(", ")?;
                 dest.fmt(f)?;
                 f.write_str(", ")
-            },
+            }
         }
     }
 }
@@ -1074,7 +1191,7 @@ bitflags::bitflags! {
     }
 }
 
-impl const BitfieldEncodable for SkyarchFlags {
+const impl BitfieldEncodable for SkyarchFlags {
     const MAX_WIDTH: u32 = 5;
 
     fn decode_bits(val: u128, _: u32) -> Self {
@@ -1148,11 +1265,11 @@ impl core::fmt::Display for SkyarchConditionCode {
     }
 }
 
-impl const BitfieldEncodable for SkyarchConditionCode {
+const impl BitfieldEncodable for SkyarchConditionCode {
     const MAX_WIDTH: u32 = 4;
     fn decode_bits(val: u128, w: u32) -> Self {
         let bits = (val & 15) as u8;
-        unsafe { core::mem::transmute(bits)}
+        unsafe { core::mem::transmute(bits) }
     }
 
     fn encode_bits(&self) -> u128 {
@@ -1170,18 +1287,17 @@ pub enum SkyarchLoadStoreMode {
     PreDec,
 }
 
-impl const BitfieldEncodable for SkyarchLoadStoreMode {
+const impl BitfieldEncodable for SkyarchLoadStoreMode {
     const MAX_WIDTH: u32 = 2;
     fn decode_bits(val: u128, w: u32) -> Self {
         let bits = (val & 3) as u8;
-        unsafe { core::mem::transmute(bits)}
+        unsafe { core::mem::transmute(bits) }
     }
 
     fn encode_bits(&self) -> u128 {
         *self as u128
     }
 }
-
 
 skyarch_opcodes! {
     pub impl SkyarchOpcode (enum SkyarchInstruction) {
@@ -1225,7 +1341,7 @@ skyarch_opcodes! {
     }
 }
 
-impl const IntoId<Opcode> for SkyarchInstruction {
+const impl IntoId<Opcode> for SkyarchInstruction {
     fn into_id(self) -> Opcode {
         Opcode::new(self.encode())
     }
@@ -1256,8 +1372,12 @@ impl MachineSpec for Skyarch {
         "skyarch"
     }
 
-
-    fn pretty_print_instr(&self, instr: Self::Opcode, _: Self::MachineMode, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+    fn pretty_print_instr(
+        &self,
+        instr: Self::Opcode,
+        _: Self::MachineMode,
+        f: &mut core::fmt::Formatter,
+    ) -> core::fmt::Result {
         use core::fmt::Display as _;
         instr.decode().fmt(f)
     }
@@ -1269,7 +1389,6 @@ impl MachineSpec for Skyarch {
 }
 
 const GPRS: [SkyarchRegister; 31] = core::array::from_fn(const |v| SkyarchRegister((v as u64) + 1));
-
 
 #[cfg(feature = "xva")]
 impl CompilerSpec for Skyarch {
@@ -1285,18 +1404,18 @@ impl CompilerSpec for Skyarch {
         match cat {
             XvaCategory::Null => Some(&[]),
             XvaCategory::Condition => None,
-            XvaCategory::Int|
-            XvaCategory::Float|
-            XvaCategory::VectorAny|
-            XvaCategory::VectorInt|
-            XvaCategory::VectorFloat|
-            XvaCategory::Aggregate => {
+            XvaCategory::Int
+            | XvaCategory::Float
+            | XvaCategory::VectorAny
+            | XvaCategory::VectorInt
+            | XvaCategory::VectorFloat
+            | XvaCategory::Aggregate => {
                 if size == 4 {
                     Some(as_id_array!(GPRS => Register))
                 } else {
                     None
                 }
-            },
+            }
             XvaCategory::Custom(_) => None,
         }
     }
@@ -1308,14 +1427,16 @@ impl CompilerSpec for Skyarch {
         _: XvaCategory,
         size: u32,
     ) -> Option<u32> {
-        if size < 4 {
-            Some(4)
-        } else {
-            None
-        }
+        if size < 4 { Some(4) } else { None }
     }
 
-    fn lower_mce(&self, stmt: &mut crate::xva::XvaStatement, _: Self::MachineMode, _: &CompilerContext, _: &FeatureSet) {
+    fn lower_mce(
+        &self,
+        stmt: &mut crate::xva::XvaStatement,
+        _: Self::MachineMode,
+        _: &CompilerContext,
+        _: &FeatureSet,
+    ) {
         let mut preamble = Vec::new();
         match &*stmt {
             crate::xva::XvaStatement::Expr(expr) => {
@@ -1326,82 +1447,201 @@ impl CompilerSpec for Skyarch {
                         return;
                     }
                     crate::xva::XvaOpcode::ZeroInit => {
-                        Instruction::new_nullary(SkyarchInstruction::Mov { dest: dest.regno(), ssrc: SkyarchRegno::r0, latency: false, cond: SkyarchConditionCode::Always, dir: false, map: Map::GeneralPurpose})
-                    },
-                    crate::xva::XvaOpcode::Const(xva_const) => {
-                        match xva_const {
-                            crate::xva::XvaConst::Bits(v) => {
-                                Instruction::new(SkyarchInstruction::LdiW { dest: dest.regno(), signed: false }, vec![Operand::Immediate(v as u128)])
+                        Instruction::new_nullary(SkyarchInstruction::Mov {
+                            dest: dest.regno(),
+                            ssrc: SkyarchRegno::r0,
+                            latency: false,
+                            cond: SkyarchConditionCode::Always,
+                            dir: false,
+                            map: Map::GeneralPurpose,
+                        })
+                    }
+                    crate::xva::XvaOpcode::Const(xva_const) => match xva_const {
+                        crate::xva::XvaConst::Bits(v) => Instruction::new(
+                            SkyarchInstruction::LdiW {
+                                dest: dest.regno(),
+                                signed: false,
                             },
-                            xva_const => {
-                                let addr = xva_const.to_direct_rel(crate::instr::AddressKind::Default, crate::instr::AddressKind::Default);
-                                Instruction::new(SkyarchInstruction::LraW { dest: dest.regno(), signed: false }, vec![addr])
-                            }
+                            vec![Operand::Immediate(v as u128)],
+                        ),
+                        xva_const => {
+                            let addr = xva_const.to_direct_rel(
+                                crate::instr::AddressKind::Default,
+                                crate::instr::AddressKind::Default,
+                            );
+                            Instruction::new(
+                                SkyarchInstruction::LraW {
+                                    dest: dest.regno(),
+                                    signed: false,
+                                },
+                                vec![addr],
+                            )
                         }
                     },
                     crate::xva::XvaOpcode::Move(src) => {
                         let src = Self::areg(src);
-                        Instruction::new_nullary(SkyarchInstruction::Mov { dest: dest.regno(), ssrc: src.regno(), latency: false, cond: SkyarchConditionCode::Always, dir: false, map: Map::GeneralPurpose})
-                    },
+                        Instruction::new_nullary(SkyarchInstruction::Mov {
+                            dest: dest.regno(),
+                            ssrc: src.regno(),
+                            latency: false,
+                            cond: SkyarchConditionCode::Always,
+                            dir: false,
+                            map: Map::GeneralPurpose,
+                        })
+                    }
                     crate::xva::XvaOpcode::ComputeAddr { base, size, index } => todo!(),
                     crate::xva::XvaOpcode::GetFrameAddr(_) => todo!(),
-                    crate::xva::XvaOpcode::BinaryOp { op, left, right } => {
-                        'a: {
-                            let src1 = Self::areg(left);
-                            let src2 = match right {
-                                crate::xva::XvaOperand::Register(src) => Self::areg(src),
-                                crate::xva::XvaOperand::Const(xva_const) => {
-                                    let opr = xva_const.to_readable(AddressKind::Default, AddressKind::Default, true, None);
-                                    let (vval, signext) = match xva_const {
-                                        crate::xva::XvaConst::Bits(v) => {
-                                            if v < u16::MAX as u64 {
-                                                (Some(v as u16), false)
-                                            } else if v > (i16::MIN as u64) {
-                                                (Some(v as u16), true)
-                                            } else {
-                                                (None, false)
-                                            }
+                    crate::xva::XvaOpcode::BinaryOp { op, left, right } => 'a: {
+                        let src1 = Self::areg(left);
+                        let src2 = match right {
+                            crate::xva::XvaOperand::Register(src) => Self::areg(src),
+                            crate::xva::XvaOperand::Const(xva_const) => {
+                                let opr = xva_const.to_readable(
+                                    AddressKind::Default,
+                                    AddressKind::Default,
+                                    true,
+                                    None,
+                                );
+                                let (vval, signext) = match xva_const {
+                                    crate::xva::XvaConst::Bits(v) => {
+                                        if v < u16::MAX as u64 {
+                                            (Some(v as u16), false)
+                                        } else if v > (i16::MIN as u64) {
+                                            (Some(v as u16), true)
+                                        } else {
+                                            (None, false)
+                                        }
+                                    }
+                                    _ => todo!(),
+                                };
+
+                                let instr = match (op, vval) {
+                                    (BinaryOp::Add, Some(vval)) => {
+                                        break 'a Instruction::new_nullary(
+                                            SkyarchInstruction::Addi {
+                                                dest: dest.regno(),
+                                                signed: signext,
+                                                supress_flags: true,
+                                                higher_half: false,
+                                                imm: vval,
+                                            },
+                                        );
+                                    }
+                                    (BinaryOp::Add, None) => {
+                                        break 'a Instruction::new(
+                                            SkyarchInstruction::AddiW {
+                                                dest: dest.regno(),
+                                                signed: signext,
+                                                supress_flags: true,
+                                                higher_half: false,
+                                            },
+                                            vec![opr],
+                                        );
+                                    }
+                                    (_, Some(vval)) => {
+                                        Instruction::new_nullary(SkyarchInstruction::Ldi {
+                                            dest: SkyarchRegno::r15,
+                                            signed: signext,
+                                            imm: vval as i16,
+                                        })
+                                    }
+                                    (_, None) => Instruction::new(
+                                        SkyarchInstruction::LdiW {
+                                            dest: SkyarchRegno::r15,
+                                            signed: signext,
                                         },
-                                        _ => todo!(),
-                                    };
+                                        vec![opr],
+                                    ),
+                                };
 
-                                    let instr = match (op, vval) {
-                                        (BinaryOp::Add, Some(vval)) => {
-                                            break 'a Instruction::new_nullary(SkyarchInstruction::Addi { dest: dest.regno(), signed: signext, supress_flags: true, higher_half: false, imm: vval })
-                                        }
-                                        (BinaryOp::Add, None) => {
-                                            break 'a Instruction::new(SkyarchInstruction::AddiW { dest: dest.regno(), signed: signext, supress_flags: true, higher_half: false }, vec![opr])
-                                        }
-                                        (_, Some(vval)) => {
-                                            Instruction::new_nullary(SkyarchInstruction::Ldi { dest: SkyarchRegno::r15, signed: signext, imm: vval as i16 })
-                                        }
-                                        (_, None) => {
-                                            Instruction::new(SkyarchInstruction::LdiW { dest: SkyarchRegno::r15, signed: signext }, vec![opr])
-                                        }
-                                    };
+                                preamble.push(XvaStatement::RawInstr(instr));
+                                SkyarchRegister::r15
+                            }
+                            crate::xva::XvaOperand::FrameAddr(_) => todo!(),
+                        };
 
-                                    preamble.push(XvaStatement::RawInstr(instr));
-                                    SkyarchRegister::r15
-                                },
-                                crate::xva::XvaOperand::FrameAddr(_) => todo!(),
-                            };
+                        let instr = match op {
+                            crate::xva::BinaryOp::Add => SkyarchInstruction::Add {
+                                dest: dest.regno(),
+                                src1: src1.regno(),
+                                src2: src2.regno(),
+                                supress_flags: true,
+                                shift: 0,
+                                shift_polarity: false,
+                            },
+                            crate::xva::BinaryOp::Sub => SkyarchInstruction::Sub {
+                                dest: dest.regno(),
+                                src1: src1.regno(),
+                                src2: src2.regno(),
+                                supress_flags: true,
+                                shift: 0,
+                                shift_polarity: false,
+                            },
+                            crate::xva::BinaryOp::And => SkyarchInstruction::And {
+                                dest: dest.regno(),
+                                src1: src1.regno(),
+                                src2: src2.regno(),
+                                supress_flags: true,
+                                shift: 0,
+                                shift_polarity: false,
+                                invert: 0,
+                            },
+                            crate::xva::BinaryOp::Or => SkyarchInstruction::Or {
+                                dest: dest.regno(),
+                                src1: src1.regno(),
+                                src2: src2.regno(),
+                                supress_flags: true,
+                                shift: 0,
+                                shift_polarity: false,
+                                invert: 0,
+                            },
+                            crate::xva::BinaryOp::Xor => SkyarchInstruction::Xor {
+                                dest: dest.regno(),
+                                src1: src1.regno(),
+                                src2: src2.regno(),
+                                supress_flags: true,
+                                shift: 0,
+                                shift_polarity: false,
+                                invert: 0,
+                            },
+                            crate::xva::BinaryOp::ShiftLeft(shift_behaviour) => {
+                                SkyarchInstruction::Fsl {
+                                    dest: dest.regno(),
+                                    value: src1.regno(),
+                                    quantity: src2.regno(),
+                                    supress_flags: true,
+                                    invert_sign: false,
+                                    wrap_quantity: matches!(
+                                        shift_behaviour,
+                                        crate::xva::ShiftBehaviour::WrapQuantity
+                                    ),
+                                    remainder: SkyarchRegno::r0,
+                                }
+                            }
+                            crate::xva::BinaryOp::ShiftRight(shift_behaviour, mode) => {
+                                SkyarchInstruction::Fsr {
+                                    dest: dest.regno(),
+                                    value: src1.regno(),
+                                    quantity: src2.regno(),
+                                    supress_flags: true,
+                                    invert_sign: matches!(mode, RightShiftMode::Signed),
+                                    wrap_quantity: matches!(
+                                        shift_behaviour,
+                                        crate::xva::ShiftBehaviour::WrapQuantity
+                                    ),
+                                    remainder: SkyarchRegno::r0,
+                                }
+                            }
+                        };
 
-
-
-                            let instr = match op {
-                                crate::xva::BinaryOp::Add => SkyarchInstruction::Add { dest: dest.regno(), src1: src1.regno(), src2: src2.regno(), supress_flags: true, shift: 0, shift_polarity: false },
-                                crate::xva::BinaryOp::Sub => SkyarchInstruction::Sub { dest: dest.regno(), src1: src1.regno(), src2: src2.regno(), supress_flags: true, shift: 0, shift_polarity: false },
-                                crate::xva::BinaryOp::And => SkyarchInstruction::And { dest: dest.regno(), src1: src1.regno(), src2: src2.regno(), supress_flags: true, shift: 0, shift_polarity: false, invert: 0 },
-                                crate::xva::BinaryOp::Or => SkyarchInstruction::Or { dest: dest.regno(), src1: src1.regno(), src2: src2.regno(), supress_flags: true, shift: 0, shift_polarity: false, invert: 0 },
-                                crate::xva::BinaryOp::Xor => SkyarchInstruction::Xor { dest: dest.regno(), src1: src1.regno(), src2: src2.regno(), supress_flags: true, shift: 0, shift_polarity: false, invert: 0 },
-                                crate::xva::BinaryOp::ShiftLeft(shift_behaviour) => SkyarchInstruction::Fsl { dest: dest.regno(), value: src1.regno(), quantity: src2.regno(), supress_flags: true, invert_sign: false, wrap_quantity: matches!(shift_behaviour, crate::xva::ShiftBehaviour::WrapQuantity), remainder: SkyarchRegno::r0 },
-                                crate::xva::BinaryOp::ShiftRight(shift_behaviour ,mode) => SkyarchInstruction::Fsr { dest: dest.regno(), value: src1.regno(), quantity: src2.regno(), supress_flags: true, invert_sign: matches!(mode, RightShiftMode::Signed), wrap_quantity: matches!(shift_behaviour, crate::xva::ShiftBehaviour::WrapQuantity), remainder: SkyarchRegno::r0 },
-                            };
-
-                            Instruction::new_nullary(instr)
-                        }
-                    },
-                    crate::xva::XvaOpcode::CheckedBinaryOp { op, mode, left, right } => todo!(),
+                        Instruction::new_nullary(instr)
+                    }
+                    crate::xva::XvaOpcode::CheckedBinaryOp {
+                        op,
+                        mode,
+                        left,
+                        right,
+                    } => todo!(),
                     crate::xva::XvaOpcode::UnaryOp { op, left } => todo!(),
                     crate::xva::XvaOpcode::Read(xva_operand) => todo!(),
                     crate::xva::XvaOpcode::UMul { left, right } => todo!(),
@@ -1417,17 +1657,30 @@ impl CompilerSpec for Skyarch {
 
                     *stmt = XvaStatement::Elaborated(preamble)
                 }
-            },
+            }
             crate::xva::XvaStatement::Write(xva_operand, xva_type, xva_register) => todo!(),
             crate::xva::XvaStatement::Jump(symbol) => {
-                let op = Operand::RelSymbol(RelocSym{sym: *symbol, kind: AddressKind::Default}, None);
+                let op = Operand::RelSymbol(
+                    RelocSym {
+                        sym: *symbol,
+                        kind: AddressKind::Default,
+                    },
+                    None,
+                );
 
-                let instr = Instruction::new(SkyarchInstruction::JmpW { cond: SkyarchConditionCode::Always, link: SkyarchRegno::r0, dest: SkyarchRegno::r15 }, vec![op]);
+                let instr = Instruction::new(
+                    SkyarchInstruction::JmpW {
+                        cond: SkyarchConditionCode::Always,
+                        link: SkyarchRegno::r0,
+                        dest: SkyarchRegno::r15,
+                    },
+                    vec![op],
+                );
 
                 *stmt = XvaStatement::RawInstr(instr);
-            },
-            rstmt @ (crate::xva::XvaStatement::Tailcall { dest,  .. } |
-            crate::xva::XvaStatement::Call { dest, .. }) => {
+            }
+            rstmt @ (crate::xva::XvaStatement::Tailcall { dest, .. }
+            | crate::xva::XvaStatement::Call { dest, .. }) => {
                 let link = match rstmt {
                     XvaStatement::Tailcall { .. } => SkyarchRegno::r0,
                     _ => SkyarchRegno::r31,
@@ -1435,34 +1688,59 @@ impl CompilerSpec for Skyarch {
                 let instr = match dest {
                     crate::xva::XvaOperand::Register(reg) => {
                         let reg = Self::areg(*reg);
-                        Instruction::new_nullary(SkyarchInstruction::Jmpr { cond: SkyarchConditionCode::Always, link, dest: reg.regno() })
-                    },
+                        Instruction::new_nullary(SkyarchInstruction::Jmpr {
+                            cond: SkyarchConditionCode::Always,
+                            link,
+                            dest: reg.regno(),
+                        })
+                    }
                     crate::xva::XvaOperand::Const(xva_const) => {
-                        let opr = xva_const.to_direct_rel(AddressKind::Default, AddressKind::Default);
-                        Instruction::new(SkyarchInstruction::JmpW { cond: SkyarchConditionCode::Always, link, dest: SkyarchRegno::r15 }, vec![opr])
-                    },
+                        let opr =
+                            xva_const.to_direct_rel(AddressKind::Default, AddressKind::Default);
+                        Instruction::new(
+                            SkyarchInstruction::JmpW {
+                                cond: SkyarchConditionCode::Always,
+                                link,
+                                dest: SkyarchRegno::r15,
+                            },
+                            vec![opr],
+                        )
+                    }
                     crate::xva::XvaOperand::FrameAddr(_) => todo!(),
                 };
 
                 *stmt = XvaStatement::RawInstr(instr);
-            },
+            }
             crate::xva::XvaStatement::Return => {
-                *stmt = XvaStatement::RawInstr(Instruction::new_nullary(SkyarchInstruction::Jmpr { cond: SkyarchConditionCode::Always, link: SkyarchRegno::r0, dest: SkyarchRegno::r31 }))
-            },
+                *stmt = XvaStatement::RawInstr(Instruction::new_nullary(SkyarchInstruction::Jmpr {
+                    cond: SkyarchConditionCode::Always,
+                    link: SkyarchRegno::r0,
+                    dest: SkyarchRegno::r31,
+                }))
+            }
             crate::xva::XvaStatement::Trap(xva_trap) => {
                 *stmt = XvaStatement::RawInstr(Instruction::new_nullary(SkyarchInstruction::Und00));
-            },
-            crate::xva::XvaStatement::Noop(_) => *stmt = XvaStatement::RawInstr(Instruction::new_nullary(SkyarchInstruction::Pause { k: 1 })),
-            crate::xva::XvaStatement::RawInstr(_) |
-            crate::xva::XvaStatement::OptGate(..) |
-            crate::xva::XvaStatement::EndOptGate(_) |
-            crate::xva::XvaStatement::Elaborated(..) |
-            crate::xva::XvaStatement::Use(..) |
-            crate::xva::XvaStatement::Fallthrough(..) => unimplemented!(),
+            }
+            crate::xva::XvaStatement::Noop(_) => {
+                *stmt =
+                    XvaStatement::RawInstr(Instruction::new_nullary(SkyarchInstruction::Pause {
+                        k: 1,
+                    }))
+            }
+            crate::xva::XvaStatement::RawInstr(_)
+            | crate::xva::XvaStatement::OptGate(..)
+            | crate::xva::XvaStatement::EndOptGate(_)
+            | crate::xva::XvaStatement::Elaborated(..)
+            | crate::xva::XvaStatement::Use(..)
+            | crate::xva::XvaStatement::Fallthrough(..) => unimplemented!(),
         }
     }
 
-    fn lower_epilogue(&self, frame: &crate::xva::XvaFrameProperties, _: Self::MachineMode) -> Vec<crate::xva::XvaStatement> {
+    fn lower_epilogue(
+        &self,
+        frame: &crate::xva::XvaFrameProperties,
+        _: Self::MachineMode,
+    ) -> Vec<crate::xva::XvaStatement> {
         if !frame.has_prologue {
             return Vec::new();
         }
@@ -1473,21 +1751,47 @@ impl CompilerSpec for Skyarch {
 
         if save_frame_size > 0 {
             let extended = save_frame_size < (i16::MIN as isize);
-            ret.push(XvaStatement::RawInstr(Instruction::new_nullary(SkyarchInstruction::Addi { dest: SkyarchRegno::r30, signed: !extended, supress_flags: true, higher_half: false, imm: (save_frame_size as u16) })));
+            ret.push(XvaStatement::RawInstr(Instruction::new_nullary(
+                SkyarchInstruction::Addi {
+                    dest: SkyarchRegno::r30,
+                    signed: !extended,
+                    supress_flags: true,
+                    higher_half: false,
+                    imm: (save_frame_size as u16),
+                },
+            )));
             if extended {
-                ret.push(XvaStatement::RawInstr(Instruction::new_nullary(SkyarchInstruction::Addi { dest: SkyarchRegno::r30, signed: false, supress_flags: true, higher_half: true, imm: ((save_frame_size >> 16) as u16) })));
+                ret.push(XvaStatement::RawInstr(Instruction::new_nullary(
+                    SkyarchInstruction::Addi {
+                        dest: SkyarchRegno::r30,
+                        signed: false,
+                        supress_flags: true,
+                        higher_half: true,
+                        imm: ((save_frame_size >> 16) as u16),
+                    },
+                )));
             }
         }
 
         if !frame.is_leaf {
-            ret.push(XvaStatement::RawInstr(Instruction::new_nullary(SkyarchInstruction::Ld { dest: SkyarchRegno::r31, src: SkyarchRegno::r30, width: SkyarchByteSize::Word, mode: SkyarchLoadStoreMode::PostInc })));
+            ret.push(XvaStatement::RawInstr(Instruction::new_nullary(
+                SkyarchInstruction::Ld {
+                    dest: SkyarchRegno::r31,
+                    src: SkyarchRegno::r30,
+                    width: SkyarchByteSize::Word,
+                    mode: SkyarchLoadStoreMode::PostInc,
+                },
+            )));
         }
 
         ret
-
     }
 
-    fn emit_prologue(&self, frame: &mut crate::xva::XvaFrameProperties, _: Self::MachineMode) -> Vec<crate::instr::Instruction> {
+    fn emit_prologue(
+        &self,
+        frame: &mut crate::xva::XvaFrameProperties,
+        _: Self::MachineMode,
+    ) -> Vec<crate::instr::Instruction> {
         let mut ret = Vec::new();
         frame.has_prologue = false;
         frame.frame_size = (frame.frame_size + (frame.frame_align - 1)) & !(frame.frame_align - 1);
@@ -1495,7 +1799,12 @@ impl CompilerSpec for Skyarch {
         if !frame.is_leaf {
             frame.frame_size += 4;
             frame.has_prologue = true;
-            ret.push(Instruction::new_nullary(SkyarchInstruction::St { dest: SkyarchRegno::r30, src: SkyarchRegno::r31, width: SkyarchByteSize::Word, mode: SkyarchLoadStoreMode::PreDec }));
+            ret.push(Instruction::new_nullary(SkyarchInstruction::St {
+                dest: SkyarchRegno::r30,
+                src: SkyarchRegno::r31,
+                width: SkyarchByteSize::Word,
+                mode: SkyarchLoadStoreMode::PreDec,
+            }));
         }
 
         if frame.frame_align > frame.call_align {
@@ -1506,9 +1815,21 @@ impl CompilerSpec for Skyarch {
 
         if save_frame_size > 0 {
             frame.has_prologue = true;
-            ret.push(Instruction::new_nullary(SkyarchInstruction::Addi { dest: SkyarchRegno::r30, signed: false, supress_flags: true, higher_half: false, imm: (save_frame_size as u16) }));
+            ret.push(Instruction::new_nullary(SkyarchInstruction::Addi {
+                dest: SkyarchRegno::r30,
+                signed: false,
+                supress_flags: true,
+                higher_half: false,
+                imm: (save_frame_size as u16),
+            }));
             if save_frame_size > (u16::MAX as usize) {
-                ret.push(Instruction::new_nullary(SkyarchInstruction::Addi { dest: SkyarchRegno::r30, signed: false, supress_flags: true, higher_half: true, imm: ((save_frame_size >> 16) as u16) }));
+                ret.push(Instruction::new_nullary(SkyarchInstruction::Addi {
+                    dest: SkyarchRegno::r30,
+                    signed: false,
+                    supress_flags: true,
+                    higher_half: true,
+                    imm: ((save_frame_size >> 16) as u16),
+                }));
             }
         }
 

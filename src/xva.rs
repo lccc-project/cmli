@@ -1,7 +1,13 @@
 use std::num::NonZero;
 
 use crate::{
-    compiler::{Compiler, CompilerContext}, fmt::pretty_print_list, instr::{Address, AddressKind, Instruction, MemoryOperand, Operand, RegisterKind, RelocSym}, intern::Symbol, mach::{FeatureSet, Machine, MachineMode, Register, Regset}, traits::{AsId, IdType as _, IntoId}, xva
+    compiler::{Compiler, CompilerContext},
+    fmt::pretty_print_list,
+    instr::{Address, AddressKind, Instruction, MemoryOperand, Operand, RegisterKind, RelocSym},
+    intern::Symbol,
+    mach::{FeatureSet, Machine, MachineMode, Register, Regset},
+    traits::{AsId, IdType as _, IntoId},
+    xva,
 };
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -235,41 +241,111 @@ pub enum XvaConst {
 }
 
 impl XvaConst {
-    pub fn to_direct_rel(&self, local_address_kind: AddressKind, global_address_kind: AddressKind) -> Operand {
+    pub fn to_direct_rel(
+        &self,
+        local_address_kind: AddressKind,
+        global_address_kind: AddressKind,
+    ) -> Operand {
         match self {
             XvaConst::Bits(n) => Operand::Immediate(*n as u128),
-            XvaConst::Label(symbol) => Operand::RelSymbol(RelocSym{sym: *symbol, kind: local_address_kind}, None),
-            XvaConst::Global(symbol, disp) => Operand::RelSymbol(RelocSym{sym: *symbol, kind: local_address_kind}, NonZero::new(*disp)),
+            XvaConst::Label(symbol) => Operand::RelSymbol(
+                RelocSym {
+                    sym: *symbol,
+                    kind: local_address_kind,
+                },
+                None,
+            ),
+            XvaConst::Global(symbol, disp) => Operand::RelSymbol(
+                RelocSym {
+                    sym: *symbol,
+                    kind: local_address_kind,
+                },
+                NonZero::new(*disp),
+            ),
         }
     }
 
-    pub fn to_direct_abs(&self, local_address_kind: AddressKind, global_address_kind: AddressKind) -> Operand {
+    pub fn to_direct_abs(
+        &self,
+        local_address_kind: AddressKind,
+        global_address_kind: AddressKind,
+    ) -> Operand {
         match self {
             XvaConst::Bits(n) => Operand::Immediate(*n as u128),
-            XvaConst::Label(symbol) => Operand::AbsSymbol(RelocSym{sym: *symbol, kind: local_address_kind}, None),
-            XvaConst::Global(symbol, disp) => Operand::AbsSymbol(RelocSym{sym: *symbol, kind: global_address_kind}, NonZero::new(*disp)),
+            XvaConst::Label(symbol) => Operand::AbsSymbol(
+                RelocSym {
+                    sym: *symbol,
+                    kind: local_address_kind,
+                },
+                None,
+            ),
+            XvaConst::Global(symbol, disp) => Operand::AbsSymbol(
+                RelocSym {
+                    sym: *symbol,
+                    kind: global_address_kind,
+                },
+                NonZero::new(*disp),
+            ),
         }
     }
 
-    pub fn to_readable(&self, local_address_kind: AddressKind, global_address_kind: AddressKind, supports_rel: bool, size_hint: Option<usize>) -> Operand {
+    pub fn to_readable(
+        &self,
+        local_address_kind: AddressKind,
+        global_address_kind: AddressKind,
+        supports_rel: bool,
+        size_hint: Option<usize>,
+    ) -> Operand {
         match self {
             XvaConst::Bits(n) => Operand::Immediate(*n as u128),
-            _ => Operand::Memory(MemoryOperand { value_size: size_hint, addr: self.to_address(local_address_kind, global_address_kind, supports_rel) })
+            _ => Operand::Memory(MemoryOperand {
+                value_size: size_hint,
+                addr: self.to_address(local_address_kind, global_address_kind, supports_rel),
+            }),
         }
     }
 
-    pub fn to_address(&self, local_address_kind: AddressKind, global_address_kind: AddressKind, supports_rel: bool) -> Address {
+    pub fn to_address(
+        &self,
+        local_address_kind: AddressKind,
+        global_address_kind: AddressKind,
+        supports_rel: bool,
+    ) -> Address {
         match self {
-            XvaConst::Bits(n) => {
-                Address { segment: None, base: None, index: None, scale: nzlit!(1), sym: None, disp: NonZero::new((*n) as i64), rel: false }
-            }
-            XvaConst::Label(label) => {
-                Address {segment: None, base: None, index: None, scale: nzlit!(1), sym: Some(RelocSym{sym: *label, kind: local_address_kind}), disp: None, rel: supports_rel}
-            }
+            XvaConst::Bits(n) => Address {
+                segment: None,
+                base: None,
+                index: None,
+                scale: nzlit!(1),
+                sym: None,
+                disp: NonZero::new((*n) as i64),
+                rel: false,
+            },
+            XvaConst::Label(label) => Address {
+                segment: None,
+                base: None,
+                index: None,
+                scale: nzlit!(1),
+                sym: Some(RelocSym {
+                    sym: *label,
+                    kind: local_address_kind,
+                }),
+                disp: None,
+                rel: supports_rel,
+            },
 
-            XvaConst::Global(label, disp) => {
-                Address {segment: None, base: None, index: None, scale: nzlit!(1), sym: Some(RelocSym{sym: *label, kind: global_address_kind}), disp: NonZero::new(*disp), rel: supports_rel}
-            }
+            XvaConst::Global(label, disp) => Address {
+                segment: None,
+                base: None,
+                index: None,
+                scale: nzlit!(1),
+                sym: Some(RelocSym {
+                    sym: *label,
+                    kind: global_address_kind,
+                }),
+                disp: NonZero::new(*disp),
+                rel: supports_rel,
+            },
         }
     }
 }
@@ -409,7 +485,6 @@ pub enum RightShiftMode {
     Unsigned,
     Signed,
 }
-
 
 impl core::fmt::Display for RightShiftMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -621,7 +696,15 @@ pub struct XvaFrameProperties {
 impl XvaFrameProperties {
     pub const fn new() -> Self {
         Self {
-            frame_size: 0, frame_align: 1, call_align: 1, call_align_offset: 0, has_prologue: false, use_frame_pointer: false, is_leaf: false, features: FeatureSet::new(), __non_exhaustive: ()
+            frame_size: 0,
+            frame_align: 1,
+            call_align: 1,
+            call_align_offset: 0,
+            has_prologue: false,
+            use_frame_pointer: false,
+            is_leaf: false,
+            features: FeatureSet::new(),
+            __non_exhaustive: (),
         }
     }
 }
@@ -674,7 +757,7 @@ pub struct XvaFunction {
     pub return_regs: Regset,
     pub prologue: Vec<Instruction>,
     pub body: Vec<XvaBasicBlock>,
-    pub frame_properties: XvaFrameProperties
+    pub frame_properties: XvaFrameProperties,
 }
 
 impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaFunction> {
@@ -690,7 +773,6 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaFunction> {
         f.write_str("\n")?;
 
         f.write_str("CLOBBERS REGISTERS: ")?;
-
 
         PrettyPrinter(&self.clobber_regs, self.1, self.2).fmt(f)?;
         f.write_str("\n")?;
@@ -710,7 +792,6 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaFunction> {
                 f.write_str("\n")?;
             }
         }
-        
 
         for bb in &self.0.body {
             PrettyPrinter(bb, self.1, self.2).fmt(f)?;
@@ -739,7 +820,8 @@ impl XvaFile {
     pub fn lower_mc(&mut self, compiler: &dyn Compiler, context: &CompilerContext) {
         for func in &mut self.functions {
             if func.body.frame_properties.has_prologue {
-                func.body.prologue = compiler.emit_prologue(&mut func.body.frame_properties, context.mode);
+                func.body.prologue =
+                    compiler.emit_prologue(&mut func.body.frame_properties, context.mode);
             }
             for block in &mut func.body.body {
                 match &mut block.body {
@@ -751,7 +833,7 @@ impl XvaFile {
                         let _stmts = core::mem::take(stmts);
 
                         opt::flatten_statements(stmts, _stmts);
-                    },
+                    }
                 }
             }
         }

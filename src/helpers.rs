@@ -3,8 +3,6 @@ use std::fmt::{DebugAsHex, FormattingOptions};
 
 use crate::fmt::{PrettyPrint, PrettyPrinter, pretty_print_list};
 
-
-
 pub const trait BitsetTy: Copy {
     fn from_u32(bit: u32) -> Self;
     fn into_u32(self) -> u32;
@@ -17,9 +15,8 @@ impl core::fmt::Debug for ForceHexPrint {
         let Self(val) = self;
         match f.options().get_debug_as_hex() {
             Some(DebugAsHex::Upper) => f.write_fmt(format_args!("{val:#018X}")),
-            _ => f.write_fmt(format_args!("{val:#018x}"))
+            _ => f.write_fmt(format_args!("{val:#018x}")),
         }
-        
     }
 }
 
@@ -28,18 +25,19 @@ pub struct Bitset<Ty, const N: usize>([u64; N], PhantomData<[Ty]>);
 
 impl<Ty, const N: usize> core::fmt::Debug for Bitset<Ty, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple(
-            "Bitset"
-        ).field_with(|f| {
-            f.debug_list()
-                .entries(self.0.iter().copied().map(ForceHexPrint))
-                .finish()
-        })
-        .finish_non_exhaustive()
+        f.debug_tuple("Bitset")
+            .field_with(|f| {
+                f.debug_list()
+                    .entries(self.0.iter().copied().map(ForceHexPrint))
+                    .finish()
+            })
+            .finish_non_exhaustive()
     }
 }
 
-impl<'a, Ty: BitsetTy + PrettyPrint, const N: usize> core::fmt::Display for PrettyPrinter<'a, Bitset<Ty, N>> {
+impl<'a, Ty: BitsetTy + PrettyPrint, const N: usize> core::fmt::Display
+    for PrettyPrinter<'a, Bitset<Ty, N>>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         pretty_print_list(*self.0, " ", self.1, self.2).fmt(f)
     }
@@ -47,7 +45,12 @@ impl<'a, Ty: BitsetTy + PrettyPrint, const N: usize> core::fmt::Display for Pret
 
 impl<Ty, const N: usize> Bitset<Ty, N> {
     pub const fn new() -> Self {
-        const {assert!(N <= (usize::MAX / 64), "Length Cap of Bitset would overflow usize");}
+        const {
+            assert!(
+                N <= (usize::MAX / 64),
+                "Length Cap of Bitset would overflow usize"
+            );
+        }
         Self([0u64; N], PhantomData)
     }
 
@@ -69,11 +72,13 @@ impl<Ty, const N: usize> Bitset<Ty, N> {
 }
 
 impl<Ty: BitsetTy, const N: usize> Bitset<Ty, N> {
-    pub const fn insert_bit(&mut self, bit: Ty) where Ty: [const] BitsetTy {
+    pub const fn insert_bit(&mut self, bit: Ty)
+    where
+        Ty: [const] BitsetTy,
+    {
         let bit = bit.into_u32();
         let idx = (bit >> 6) as usize;
         self.0[idx] |= 1 << (bit & 63);
-
     }
 
     pub fn insert_bits(&mut self, other: Bitset<Ty, N>) {
@@ -81,14 +86,20 @@ impl<Ty: BitsetTy, const N: usize> Bitset<Ty, N> {
             *a |= b;
         }
     }
-    
-    pub const fn remove_bit(&mut self, bit: Ty) where Ty: [const] BitsetTy {
+
+    pub const fn remove_bit(&mut self, bit: Ty)
+    where
+        Ty: [const] BitsetTy,
+    {
         let bit = bit.into_u32();
         let idx = (bit >> 6) as usize;
         self.0[idx] &= !(1 << (bit & 63));
     }
 
-    pub const fn contains_bit(&self, bit: Ty) -> bool where Ty: [const] BitsetTy {
+    pub const fn contains_bit(&self, bit: Ty) -> bool
+    where
+        Ty: [const] BitsetTy,
+    {
         let bit = bit.into_u32();
         let idx = (bit >> 6) as usize;
 
@@ -145,7 +156,12 @@ impl<Ty: BitsetTy, const N: usize> IntoIterator for Bitset<Ty, N> {
     }
 }
 
-pub struct BitsetIter<Ty, const N: usize>(core::array::IntoIter<u64, N>, u64, u32, PhantomData<[Ty]>);
+pub struct BitsetIter<Ty, const N: usize>(
+    core::array::IntoIter<u64, N>,
+    u64,
+    u32,
+    PhantomData<[Ty]>,
+);
 
 impl<Ty: BitsetTy, const N: usize> Iterator for BitsetIter<Ty, N> {
     type Item = Ty;
@@ -155,8 +171,7 @@ impl<Ty: BitsetTy, const N: usize> Iterator for BitsetIter<Ty, N> {
             self.2 = self.2.next_multiple_of(64);
             self.1 = self.0.next()?;
         }
-        
-        
+
         let p = self.1.trailing_zeros();
         // eprintln!("base = {}, off = {p}", self.2);
         self.1 >>= p + 1;

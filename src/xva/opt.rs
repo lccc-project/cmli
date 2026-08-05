@@ -1,6 +1,9 @@
 use std::{any::Any, collections::HashSet};
 
-use crate::{mach::{Machine, MachineMode}, xva::{BarrierKind, XvaBasicBlock, XvaFile, XvaFunction, XvaRegister, XvaStatement}};
+use crate::{
+    mach::{Machine, MachineMode},
+    xva::{BarrierKind, XvaBasicBlock, XvaFile, XvaFunction, XvaRegister, XvaStatement},
+};
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum XvaOptPhase {
@@ -28,7 +31,13 @@ pub trait XvaOpt {
 }
 
 pub trait XvaFunctionOpt: XvaOpt {
-    fn optimize_function(&self, state: &mut dyn State, func: &mut XvaFunction, phase: XvaOptPhase, mach: &dyn Machine);
+    fn optimize_function(
+        &self,
+        state: &mut dyn State,
+        func: &mut XvaFunction,
+        phase: XvaOptPhase,
+        mach: &dyn Machine,
+    );
 }
 
 pub trait XvaBasicBlockOpt: XvaOpt {
@@ -52,7 +61,13 @@ pub trait XvaStatementOpt: XvaOpt {
 }
 
 impl<X: XvaBasicBlockOpt> XvaFunctionOpt for X {
-    fn optimize_function(&self, state: &mut dyn State, func: &mut XvaFunction, phase: XvaOptPhase, mach: &dyn Machine) {
+    fn optimize_function(
+        &self,
+        state: &mut dyn State,
+        func: &mut XvaFunction,
+        phase: XvaOptPhase,
+        mach: &dyn Machine,
+    ) {
         for block in &mut func.body {
             state.reset_registers();
             for &live in &block.live_at_start {

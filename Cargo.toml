@@ -30,3 +30,6 @@ default-formats = []
 all-formats = ["default-formats"]
 
 xva = []
+asm = []
+asm-parse = ["asm"]
+asm-print = ["asm"]

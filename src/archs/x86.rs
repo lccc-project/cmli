@@ -1,15 +1,23 @@
 //! # x86 Support
-//! 
+//!
 //! x86 is supported in 16-bit, 32-bit, and 64-bit mode.
 
-
-
 use crate::{
-    instr::{AddressKind, Instruction, Operand, RelocSym}, mach::{FeatureSet, MachineMode, MachineSpec, Opcode, Register, RegisterSpec, Regset, TargetFeatureSpec}, traits::{AsId, AsRawId, IdType, Name},
+    instr::{AddressKind, Instruction, Operand, RelocSym},
+    mach::{
+        FeatureSet, MachineMode, MachineSpec, Opcode, Register, RegisterSpec, Regset,
+        TargetFeatureSpec,
+    },
+    traits::{AsId, AsRawId, IdType, Name},
 };
 
 #[cfg(feature = "xva")]
-use crate::{compiler::{CompilerSpec, CompilerContext}, xva::{XvaCategory, BinaryOp, RightShiftMode, XvaOperand, XvaRegister, XvaStatement, XvaOpcode}};
+use crate::{
+    compiler::{CompilerContext, CompilerSpec},
+    xva::{
+        BinaryOp, RightShiftMode, XvaCategory, XvaOpcode, XvaOperand, XvaRegister, XvaStatement,
+    },
+};
 
 use crate::instr::RegisterKind;
 
@@ -61,13 +69,13 @@ impl X86Mode {
         matches!(self, X86Mode::Long)
     }
 
-    /// Convience function for determining if the current mode supports arbitrary segmentation. 
+    /// Convience function for determining if the current mode supports arbitrary segmentation.
     pub const fn has_segmentation(&self) -> bool {
         !matches!(self, X86Mode::Long)
     }
 }
 
-impl const AsId<MachineMode> for X86Mode {}
+const impl AsId<MachineMode> for X86Mode {}
 
 macro_rules! def_helper_arms {
     ($var:ident, $($capture:literal)* => $prefix:ident _) => {
@@ -290,13 +298,13 @@ define_x86_registers! {
         Double[eax, ecx, edx, ebx, esp, ebp, esi, edi, #r _ d 8..32] (4) @ Int overlaps [ByteRex, Word, Quad] = RegisterKind::GeneralPurpose,
         /// Quadword registers. These access the full GPR. These are only accesible in [`X86Mode::Long`]
         Quad [rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, #r _ 8..32] (8) @ Int overlaps [ByteRex, Word, Double] = RegisterKind::GeneralPurpose,
-        /// Segment Registers. 
+        /// Segment Registers.
         Segment #[norex] [es, cs, ss, ds, fs, gs] (2) @ Custom(RegisterKind::AddressSegment) = RegisterKind::AddressSegment,
         /// Segment base registers. Accessible via read{fs,gs}base or msrs
         SegmentBase #[norex] [_, _, _, _, fsbase, gsbase] @ Custom(RegisterKind::AddressOnly) = RegisterKind::AddressOnly,
         /// Floating point stack registers. Note that these correspond to the synthetic registers exposed by fcw.TOP. There is no correspondance for the real fp registers as fp registers
         St [, #st _ 0..8] (10) @ Float = RegisterKind::ScalarFp,
-        /// MMX Technology Registers. 
+        /// MMX Technology Registers.
         Mmx #[norex] [, #mm _ 0..8] (8) @ VectorInt = RegisterKind::VectorInt,
         /// SSE 16-byte xmm registers
         Xmm [, #xmm _ 0..32] (16) @ VectorAny overlaps [Ymm, Zmm] = RegisterKind::VectorAny,
@@ -347,7 +355,7 @@ impl GprSize {
     }
 
     /// Creates a [`GprSize`] from a valid size
-    /// 
+    ///
     /// ## Panics
     /// Panics if the size is not a power of 2 less than or equal to 8
     pub const fn from_size(val: u32) -> Self {
@@ -408,12 +416,11 @@ pub enum GprName {
     r14,
     /// The R15 Register
     r15,
-
 }
 
 impl GprName {
     /// Converts to the corresponding [`X86Register`] given the [`GprSize`]
-    /// 
+    ///
     /// [`sp`][GprName::sp], [`bp`][GprName::bp], [`si`][GprName::si], and [`di`][GprName::di] are only accessible as [`GprSize::Byte`] in [`X86Mode::Long`]
     pub const fn as_reg(self, size: GprSize) -> X86Register {
         let regno = self as u8;
@@ -424,7 +431,7 @@ impl GprName {
                 } else {
                     X86Register::ByteRex(regno)
                 }
-            },
+            }
             GprSize::Word => X86Register::Word(regno),
             GprSize::Double => X86Register::Double(regno),
             GprSize::Quad => X86Register::Quad(regno),
@@ -453,9 +460,9 @@ pub enum XmmSize {
 
 impl X86Register {
     /// Promotes a general purpose register to the specified one given [`GprSize`]
-    /// 
+    ///
     /// See [`GprName::as_reg`]
-    /// 
+    ///
     /// ## Panics
     /// Panics if `*self` is not a General Purpose Register
     pub const fn promote_gpr(&self, new_size: GprSize) -> X86Register {
@@ -501,9 +508,9 @@ impl X86Register {
             _ => None,
         }
     }
-    
-    /// Promotes Xmm/Ymm/Zmm registers to the specified [`XmmSize`]. 
-    /// 
+
+    /// Promotes Xmm/Ymm/Zmm registers to the specified [`XmmSize`].
+    ///
     /// ## Panics
     /// Panics if `*self` is not an `xmm`, `ymm`, or `zmm` register
     pub const fn promote_xmm(&self, new_size: XmmSize) -> X86Register {
@@ -525,7 +532,7 @@ impl X86Register {
         }
     }
 
-    /// Determines if the `*self` is usable in the specified [`X86Mode`]. 
+    /// Determines if the `*self` is usable in the specified [`X86Mode`].
     pub const fn valid_in_mode(&self, mode: X86Mode) -> bool {
         let is_64_bit = matches!(mode, X86Mode::Long);
         let allow_protection = !matches!(mode, X86Mode::Real); // No 
@@ -552,7 +559,7 @@ impl X86Register {
     }
 }
 
-impl const AsId<Register> for X86Register {}
+const impl AsId<Register> for X86Register {}
 
 impl RegisterSpec for X86Register {
     type MachineMode = X86Mode;
@@ -639,12 +646,17 @@ impl RegisterSpec for X86Register {
 
     fn supported_registers(features: &FeatureSet, mode: Self::MachineMode) -> crate::mach::Regset {
         let max_gpr = mode.max_standard_gpr();
-        let max_egpr = if mode.supports_rex() && features.contains_feature(&X86TargetFeature::ApxF) {
+        let max_egpr = if mode.supports_rex() && features.contains_feature(&X86TargetFeature::ApxF)
+        {
             32
         } else {
             max_gpr
         };
-        let mut base_regs = Regset::from_registers((0..max_egpr).map(GprName::from_regno).map(|r| r.as_reg(mode.largest_gpr())));
+        let mut base_regs = Regset::from_registers(
+            (0..max_egpr)
+                .map(GprName::from_regno)
+                .map(|r| r.as_reg(mode.largest_gpr())),
+        );
 
         if mode.has_segmentation() {
             base_regs.insert_registers(crate::x86_registers!(cs, ss, ds, es));
@@ -653,7 +665,7 @@ impl RegisterSpec for X86Register {
         if features.contains_feature(&X86TargetFeature::Fsgs) || !mode.has_segmentation() {
             base_regs.insert_registers(crate::x86_registers!(fs, gs))
         }
-        
+
         if !mode.has_segmentation() && features.contains_feature(&X86TargetFeature::FsgsBase) {
             base_regs.insert_registers(crate::x86_registers!(fsbase, gsbase))
         }
@@ -661,13 +673,18 @@ impl RegisterSpec for X86Register {
             base_regs.insert_registers(crate::x86_registers!(fcw, ftw, fsw))
         }
 
-        if features.contains_feature(&X86TargetFeature::X87) || features.contains_feature(&X86TargetFeature::Mmx) {
+        if features.contains_feature(&X86TargetFeature::X87)
+            || features.contains_feature(&X86TargetFeature::Mmx)
+        {
             base_regs.insert_registers((0..8).map(X86Register::St));
         }
 
         if features.contains_feature(&X86TargetFeature::Sse) {
             base_regs.insert_registers(crate::x86_registers!(mxcsr));
-            let max_sse = if mode.supports_rex() && (features.contains_feature(&X86TargetFeature::Avx512f) || features.contains_feature(&X86TargetFeature::Avx10)) {
+            let max_sse = if mode.supports_rex()
+                && (features.contains_feature(&X86TargetFeature::Avx512f)
+                    || features.contains_feature(&X86TargetFeature::Avx10))
+            {
                 32
             } else {
                 max_gpr
@@ -682,7 +699,6 @@ impl RegisterSpec for X86Register {
         if features.contains_feature(&X86TargetFeature::AmxTile) {
             base_regs.insert_registers((0..8).map(X86Register::Tmm))
         }
-
 
         base_regs
     }
@@ -734,13 +750,13 @@ macro_rules! x86_instructions {
         $(#[$meta])*
         $vis enum $name {
             $(
-                #[doc = ::core::concat!("The `", $prefix_mnemonic, "` prefix")]    
-                $(#[$prefix_meta])* 
+                #[doc = ::core::concat!("The `", $prefix_mnemonic, "` prefix")]
+                $(#[$prefix_meta])*
                 $prefix_name,
             )*
             $(
-                #[doc = ::core::concat!("The `", $mnemonic, "` instruction")]  
-                $(#[$instr_meta])* 
+                #[doc = ::core::concat!("The `", $mnemonic, "` instruction")]
+                $(#[$instr_meta])*
                 $instr_name
             ),*
         }
@@ -749,7 +765,7 @@ macro_rules! x86_instructions {
             const ALL_OPCODES: [Self; ${count($instr_name)} + ${count($prefix_name)}] = [$(Self::$prefix_name,)* $(Self::$instr_name),*];
         }
 
-        impl const $crate::traits::AsId<$crate::mach::Opcode> for $name {}
+        const impl  $crate::traits::AsId<$crate::mach::Opcode> for $name {}
 
         impl $crate::traits::Name for $name {
             fn name(&self) -> &'static str {
@@ -824,7 +840,7 @@ x86_instructions! {
     }
 }
 
-def_features!{
+def_features! {
     pub enum X86TargetFeature {
         X87 "x87",
         Fsgs "fsgs",
@@ -857,7 +873,7 @@ def_features!{
         F16c "f16c",
         Rdrand "rdrand",
         PrefetchWt1 "prefetchwt1",
-        
+
         FsgsBase "fsgsbase",
         Bmi1 "bmi1",
         Avx2 "avx2",
@@ -990,43 +1006,44 @@ impl MachineSpec for X86 {
 
 #[cfg(feature = "xva")]
 impl X86 {
-    fn opcode_for_expr(&self, dest: X86Register, dest2: Option<X86Register>, expr: &XvaOpcode) -> Option<X86Opcode>{
+    fn opcode_for_expr(
+        &self,
+        dest: X86Register,
+        dest2: Option<X86Register>,
+        expr: &XvaOpcode,
+    ) -> Option<X86Opcode> {
         match expr {
-            XvaOpcode::ZeroInit => {
-                match dest {
-                    X86Register::Byte(_) |
-                    X86Register::ByteLegacy(_) |
-                    X86Register::ByteRex(_) |
-                    X86Register::Word(_) |
-                    X86Register::Double(_) |
-                    X86Register::Quad(_) => {
-                        Some(X86Opcode::Xor)
-                    },
-                    
-                    X86Register::Mmx(_) => todo!(),
-                    X86Register::Xmm(_) => todo!(),
-                    X86Register::Ymm(_) => todo!(),
-                    X86Register::Zmm(_) => todo!(),
-                    X86Register::Tmm(_) => todo!(),
-                    X86Register::Kreg(_) => todo!(),
-                    X86Register::St(_) => todo!(),
-                    X86Register::Segment(_) |
-                    X86Register::Control(_) |
-                    X86Register::Debug(_) |
-                    X86Register::ExtControl(_) |
-                    X86Register::X87SysReg(_) |
-                    X86Register::SseSysReg(_) |
-                    X86Register::SegmentBase(_)
-                    => panic!("Cannot support zeroinit of these registers"),
+            XvaOpcode::ZeroInit => match dest {
+                X86Register::Byte(_)
+                | X86Register::ByteLegacy(_)
+                | X86Register::ByteRex(_)
+                | X86Register::Word(_)
+                | X86Register::Double(_)
+                | X86Register::Quad(_) => Some(X86Opcode::Xor),
+
+                X86Register::Mmx(_) => todo!(),
+                X86Register::Xmm(_) => todo!(),
+                X86Register::Ymm(_) => todo!(),
+                X86Register::Zmm(_) => todo!(),
+                X86Register::Tmm(_) => todo!(),
+                X86Register::Kreg(_) => todo!(),
+                X86Register::St(_) => todo!(),
+                X86Register::Segment(_)
+                | X86Register::Control(_)
+                | X86Register::Debug(_)
+                | X86Register::ExtControl(_)
+                | X86Register::X87SysReg(_)
+                | X86Register::SseSysReg(_)
+                | X86Register::SegmentBase(_) => {
+                    panic!("Cannot support zeroinit of these registers")
                 }
             },
-            
+
             XvaOpcode::Uninit => None,
-            XvaOpcode::Const(val) => {
-                match val {
-                    crate::xva::XvaConst::Bits(_) => Some(X86Opcode::Mov),
-                    crate::xva::XvaConst::Label(_) |
-                    crate::xva::XvaConst::Global(_, _) => Some(X86Opcode::Lea),
+            XvaOpcode::Const(val) => match val {
+                crate::xva::XvaConst::Bits(_) => Some(X86Opcode::Mov),
+                crate::xva::XvaConst::Label(_) | crate::xva::XvaConst::Global(_, _) => {
+                    Some(X86Opcode::Lea)
                 }
             },
             XvaOpcode::Move(src) => {
@@ -1035,15 +1052,15 @@ impl X86 {
                 };
 
                 match dest {
-                    X86Register::Byte(_) |
-                    X86Register::ByteLegacy(_) |
-                    X86Register::ByteRex(_) |
-                    X86Register::Word(_) |
-                    X86Register::Double(_) |
-                    X86Register::Quad(_) |
-                    X86Register::Control(_) |
-                    X86Register::Debug(_) |
-                    X86Register::Segment(_) => Some(X86Opcode::Mov),
+                    X86Register::Byte(_)
+                    | X86Register::ByteLegacy(_)
+                    | X86Register::ByteRex(_)
+                    | X86Register::Word(_)
+                    | X86Register::Double(_)
+                    | X86Register::Quad(_)
+                    | X86Register::Control(_)
+                    | X86Register::Debug(_)
+                    | X86Register::Segment(_) => Some(X86Opcode::Mov),
                     X86Register::SegmentBase(_) => todo!("fsgsbase"),
                     X86Register::St(_) => todo!("st"),
                     X86Register::Mmx(_) => todo!("mmx"),
@@ -1053,62 +1070,67 @@ impl X86 {
                     X86Register::Tmm(_) => todo!("tmm"),
                     X86Register::Kreg(_) => todo!("kreg"),
                     X86Register::ExtControl(_) => todo!("xcr"),
-                    X86Register::X87SysReg(_) | X86Register::SseSysReg(_) => panic!("Cannot move to a fsw/fcw/ftw/mxcsr (need to use read)"),
+                    X86Register::X87SysReg(_) | X86Register::SseSysReg(_) => {
+                        panic!("Cannot move to a fsw/fcw/ftw/mxcsr (need to use read)")
+                    }
                 }
-            },
+            }
             XvaOpcode::ComputeAddr { base, size, index } => todo!(),
             XvaOpcode::GetFrameAddr(_) => todo!(),
-            XvaOpcode::BinaryOp { op, left, right } => {
-                match (*op, dest) {
-                    (BinaryOp::Add, X86Register::Byte(_) |
-                        X86Register::ByteLegacy(_) |
-                        X86Register::ByteRex(_) |
-                        X86Register::Word(_) |
-                        X86Register::Double(_) |
-                        X86Register::Quad(_)
-                    ) => {
-                        Some(X86Opcode::Add)
-                    }
-                    (BinaryOp::Sub, X86Register::Byte(_) |
-                        X86Register::ByteLegacy(_) |
-                        X86Register::ByteRex(_) |
-                        X86Register::Word(_) |
-                        X86Register::Double(_) |
-                        X86Register::Quad(_)
-                    ) => {
-                        Some(X86Opcode::Sub)
-                    }
-                    (BinaryOp::And, X86Register::Byte(_) |
-                        X86Register::ByteLegacy(_) |
-                        X86Register::ByteRex(_) |
-                        X86Register::Word(_) |
-                        X86Register::Double(_) |
-                        X86Register::Quad(_)
-                    ) => {
-                        Some(X86Opcode::And)
-                    }
-                    (BinaryOp::Or, X86Register::Byte(_) |
-                        X86Register::ByteLegacy(_) |
-                        X86Register::ByteRex(_) |
-                        X86Register::Word(_) |
-                        X86Register::Double(_) |
-                        X86Register::Quad(_)
-                    ) => {
-                        Some(X86Opcode::Or)
-                    }
-                    (BinaryOp::Xor, X86Register::Byte(_) |
-                        X86Register::ByteLegacy(_) |
-                        X86Register::ByteRex(_) |
-                        X86Register::Word(_) |
-                        X86Register::Double(_) |
-                        X86Register::Quad(_)
-                    ) => {
-                        Some(X86Opcode::Xor)
-                    }
-                    _ => todo!("Combination")
-                }
+            XvaOpcode::BinaryOp { op, left, right } => match (*op, dest) {
+                (
+                    BinaryOp::Add,
+                    X86Register::Byte(_)
+                    | X86Register::ByteLegacy(_)
+                    | X86Register::ByteRex(_)
+                    | X86Register::Word(_)
+                    | X86Register::Double(_)
+                    | X86Register::Quad(_),
+                ) => Some(X86Opcode::Add),
+                (
+                    BinaryOp::Sub,
+                    X86Register::Byte(_)
+                    | X86Register::ByteLegacy(_)
+                    | X86Register::ByteRex(_)
+                    | X86Register::Word(_)
+                    | X86Register::Double(_)
+                    | X86Register::Quad(_),
+                ) => Some(X86Opcode::Sub),
+                (
+                    BinaryOp::And,
+                    X86Register::Byte(_)
+                    | X86Register::ByteLegacy(_)
+                    | X86Register::ByteRex(_)
+                    | X86Register::Word(_)
+                    | X86Register::Double(_)
+                    | X86Register::Quad(_),
+                ) => Some(X86Opcode::And),
+                (
+                    BinaryOp::Or,
+                    X86Register::Byte(_)
+                    | X86Register::ByteLegacy(_)
+                    | X86Register::ByteRex(_)
+                    | X86Register::Word(_)
+                    | X86Register::Double(_)
+                    | X86Register::Quad(_),
+                ) => Some(X86Opcode::Or),
+                (
+                    BinaryOp::Xor,
+                    X86Register::Byte(_)
+                    | X86Register::ByteLegacy(_)
+                    | X86Register::ByteRex(_)
+                    | X86Register::Word(_)
+                    | X86Register::Double(_)
+                    | X86Register::Quad(_),
+                ) => Some(X86Opcode::Xor),
+                _ => todo!("Combination"),
             },
-            XvaOpcode::CheckedBinaryOp { op, mode, left, right } => todo!(),
+            XvaOpcode::CheckedBinaryOp {
+                op,
+                mode,
+                left,
+                right,
+            } => todo!(),
             XvaOpcode::UnaryOp { op, left } => todo!(),
             XvaOpcode::Read(xva_operand) => todo!(),
             XvaOpcode::UMul { left, right } => todo!(),
@@ -1164,24 +1186,33 @@ impl CompilerSpec for X86 {
         }
     }
 
-    fn lower_mce(&self, stmt: &mut XvaStatement, mode: X86Mode, context: &CompilerContext, features: &FeatureSet) {
+    fn lower_mce(
+        &self,
+        stmt: &mut XvaStatement,
+        mode: X86Mode,
+        context: &CompilerContext,
+        features: &FeatureSet,
+    ) {
         let instr = match stmt {
             XvaStatement::Expr(xva_expr) => {
                 let XvaRegister::Physical(dest) = xva_expr.dest else {
                     panic!("Virtual Register during mce")
                 };
 
-                let dest = dest.downcast::<X86Register>().expect("Non-x86 register encountered");
+                let dest = dest
+                    .downcast::<X86Register>()
+                    .expect("Non-x86 register encountered");
                 let dest2 = xva_expr.dest2.map(|v| {
                     let XvaRegister::Physical(v2) = v else {
                         panic!("Virtual Register during mce")
                     };
 
-                    v2.downcast::<X86Register>().expect("Non x86-register encountered")
+                    v2.downcast::<X86Register>()
+                        .expect("Non x86-register encountered")
                 });
 
                 let Some(opcode) = self.opcode_for_expr(dest, dest2, &xva_expr.op) else {
-                    *stmt = XvaStatement::Elaborated(vec![]); 
+                    *stmt = XvaStatement::Elaborated(vec![]);
                     return;
                 };
 
@@ -1191,18 +1222,23 @@ impl CompilerSpec for X86 {
                 match &xva_expr.op {
                     XvaOpcode::ZeroInit | XvaOpcode::Uninit => {
                         oprs.push(Operand::Register(Register::new(dest)));
-                    },
+                    }
                     XvaOpcode::Const(xva_const) => {
-                        oprs.push(xva_const.to_readable(context.local_address_kind, context.global_address_kind, mode.supports_rel_addr(), None));
-                    },
-                    
+                        oprs.push(xva_const.to_readable(
+                            context.local_address_kind,
+                            context.global_address_kind,
+                            mode.supports_rel_addr(),
+                            None,
+                        ));
+                    }
+
                     XvaOpcode::Move(reg) => {
                         let XvaRegister::Physical(reg) = *reg else {
                             panic!("Virtual Register during mce")
                         };
 
                         oprs.push(Operand::Register(reg))
-                    },
+                    }
                     XvaOpcode::ComputeAddr { base, size, index } => todo!(),
                     XvaOpcode::GetFrameAddr(_) => todo!(),
                     XvaOpcode::BinaryOp { op, left, right } => {
@@ -1222,12 +1258,24 @@ impl CompilerSpec for X86 {
                                     panic!("Virtual Register during mce")
                                 };
                                 oprs.push(Operand::Register(reg));
-                            },
-                            crate::xva::XvaOperand::Const(xva_const) => oprs.push(xva_const.to_readable(context.local_address_kind, context.global_address_kind, mode.supports_rel_addr(), Some(size as usize))),
+                            }
+                            crate::xva::XvaOperand::Const(xva_const) => {
+                                oprs.push(xva_const.to_readable(
+                                    context.local_address_kind,
+                                    context.global_address_kind,
+                                    mode.supports_rel_addr(),
+                                    Some(size as usize),
+                                ))
+                            }
                             crate::xva::XvaOperand::FrameAddr(_) => todo!(),
                         }
-                    },
-                    XvaOpcode::CheckedBinaryOp { op, mode, left, right } => todo!(),
+                    }
+                    XvaOpcode::CheckedBinaryOp {
+                        op,
+                        mode,
+                        left,
+                        right,
+                    } => todo!(),
                     XvaOpcode::UnaryOp { op, left } => todo!(),
                     XvaOpcode::Read(xva_operand) => todo!(),
                     XvaOpcode::UMul { left, right } => todo!(),
@@ -1235,11 +1283,18 @@ impl CompilerSpec for X86 {
                 }
 
                 Instruction::new(Opcode::new(opcode), oprs)
-            },
+            }
             XvaStatement::Write(xva_operand, ty, xva_register) => todo!("write"),
-            XvaStatement::Jump(symbol) => {
-                Instruction::new(Opcode::new(X86Opcode::Jump), vec![Operand::RelSymbol(RelocSym { sym: *symbol, kind: AddressKind::Default }, None)])
-            },
+            XvaStatement::Jump(symbol) => Instruction::new(
+                Opcode::new(X86Opcode::Jump),
+                vec![Operand::RelSymbol(
+                    RelocSym {
+                        sym: *symbol,
+                        kind: AddressKind::Default,
+                    },
+                    None,
+                )],
+            ),
             XvaStatement::Tailcall { dest, .. } => {
                 let mut oprs = Vec::with_capacity(1);
                 match *dest {
@@ -1248,14 +1303,17 @@ impl CompilerSpec for X86 {
                             panic!("Virtual Register during mce")
                         };
                         oprs.push(Operand::Register(reg))
-                    },
+                    }
                     crate::xva::XvaOperand::Const(xva_const) => {
-                        oprs.push(xva_const.to_direct_rel(context.local_address_kind, context.global_call_address_kind));
-                    },
+                        oprs.push(xva_const.to_direct_rel(
+                            context.local_address_kind,
+                            context.global_call_address_kind,
+                        ));
+                    }
                     crate::xva::XvaOperand::FrameAddr(_) => unreachable!("Cannot call the stack"),
                 }
                 Instruction::new(Opcode::new(X86Opcode::Jump), oprs)
-            },
+            }
             XvaStatement::Call { dest, .. } => {
                 let mut oprs = Vec::with_capacity(1);
                 match *dest {
@@ -1264,46 +1322,70 @@ impl CompilerSpec for X86 {
                             panic!("Virtual Register during mce")
                         };
                         oprs.push(Operand::Register(reg))
-                    },
+                    }
                     crate::xva::XvaOperand::Const(xva_const) => {
-                        oprs.push(xva_const.to_direct_rel(context.local_address_kind, context.global_call_address_kind));
-                    },
+                        oprs.push(xva_const.to_direct_rel(
+                            context.local_address_kind,
+                            context.global_call_address_kind,
+                        ));
+                    }
                     crate::xva::XvaOperand::FrameAddr(_) => unreachable!("Cannot call the stack"),
                 }
 
                 Instruction::new(Opcode::new(X86Opcode::Call), oprs)
-            },
-            XvaStatement::Return => {
-                Instruction::new_nullary(X86Opcode::Ret)
             }
+            XvaStatement::Return => Instruction::new_nullary(X86Opcode::Ret),
             XvaStatement::Trap(_) => Instruction::new_nullary(X86Opcode::Ud2),
             XvaStatement::Noop(_) => todo!("special noop"),
 
-            _ => unreachable!()
+            _ => unreachable!(),
         };
 
         *stmt = XvaStatement::RawInstr(instr);
     }
 
-    fn lower_epilogue(&self, frame: &crate::xva::XvaFrameProperties, mode: X86Mode) -> Vec<XvaStatement> {
+    fn lower_epilogue(
+        &self,
+        frame: &crate::xva::XvaFrameProperties,
+        mode: X86Mode,
+    ) -> Vec<XvaStatement> {
         let mode_gpr = mode.largest_gpr();
         let sp = GprName::sp.as_reg(mode_gpr);
         let mut epilogue = Vec::new();
         if frame.use_frame_pointer {
             let bp = GprName::bp.as_reg(mode_gpr);
-            epilogue.push(XvaStatement::RawInstr(Instruction::new(Opcode::new(X86Opcode::Mov), vec![Operand::Register(Register::new(sp)), Operand::Register(Register::new(bp))])));
-            epilogue.push(XvaStatement::RawInstr(Instruction::new(Opcode::new(X86Opcode::Pop), vec![Operand::Register(Register::new(bp))])));
+            epilogue.push(XvaStatement::RawInstr(Instruction::new(
+                Opcode::new(X86Opcode::Mov),
+                vec![
+                    Operand::Register(Register::new(sp)),
+                    Operand::Register(Register::new(bp)),
+                ],
+            )));
+            epilogue.push(XvaStatement::RawInstr(Instruction::new(
+                Opcode::new(X86Opcode::Pop),
+                vec![Operand::Register(Register::new(bp))],
+            )));
         } else if frame.has_prologue {
             let size = frame.frame_size;
-            epilogue.push(XvaStatement::RawInstr(Instruction::new(Opcode::new(X86Opcode::Add), vec![Operand::Register(Register::new(sp)), Operand::Immediate(size as u128)])));
+            epilogue.push(XvaStatement::RawInstr(Instruction::new(
+                Opcode::new(X86Opcode::Add),
+                vec![
+                    Operand::Register(Register::new(sp)),
+                    Operand::Immediate(size as u128),
+                ],
+            )));
         }
         epilogue
     }
 
-    fn emit_prologue(&self, frame: &mut crate::xva::XvaFrameProperties, mode: X86Mode) -> Vec<Instruction> {
+    fn emit_prologue(
+        &self,
+        frame: &mut crate::xva::XvaFrameProperties,
+        mode: X86Mode,
+    ) -> Vec<Instruction> {
         let mode_gpr = mode.largest_gpr();
         let sp = GprName::sp.as_reg(mode_gpr);
-        
+
         let mut used_size = 0;
         let mut align_frame = false;
         if frame.call_align < frame.frame_align {
@@ -1316,15 +1398,30 @@ impl CompilerSpec for X86 {
             let fptr_size = mode_gpr.size() as usize;
             frame.frame_size += fptr_size;
             used_size += 8;
-            instrs.push(Instruction::new(Opcode::new(X86Opcode::Push), vec![Operand::Register(Register::new(bp))]));
-            instrs.push(Instruction::new(Opcode::new(X86Opcode::Mov), vec![Operand::Register(Register::new(bp)), Operand::Register(Register::new(sp))]));
+            instrs.push(Instruction::new(
+                Opcode::new(X86Opcode::Push),
+                vec![Operand::Register(Register::new(bp))],
+            ));
+            instrs.push(Instruction::new(
+                Opcode::new(X86Opcode::Mov),
+                vec![
+                    Operand::Register(Register::new(bp)),
+                    Operand::Register(Register::new(sp)),
+                ],
+            ));
         }
 
         let mut align_offset = frame.call_align_offset;
 
         if align_frame {
             let align = !(frame.frame_align - 1) as u32;
-            instrs.push(Instruction::new(Opcode::new(X86Opcode::And), vec![Operand::Register(Register::new(sp)), Operand::Immediate(align as u128)]));
+            instrs.push(Instruction::new(
+                Opcode::new(X86Opcode::And),
+                vec![
+                    Operand::Register(Register::new(sp)),
+                    Operand::Immediate(align as u128),
+                ],
+            ));
 
             align_offset = 0;
         }
@@ -1339,9 +1436,15 @@ impl CompilerSpec for X86 {
         let sub_size = frame.frame_size - used_size;
 
         if sub_size > 0 {
-            instrs.push(Instruction::new(Opcode::new(X86Opcode::Sub), vec![Operand::Register(Register::new(sp)), Operand::Immediate(sub_size as u128)]));
+            instrs.push(Instruction::new(
+                Opcode::new(X86Opcode::Sub),
+                vec![
+                    Operand::Register(Register::new(sp)),
+                    Operand::Immediate(sub_size as u128),
+                ],
+            ));
         }
-        
+
         frame.has_prologue = !instrs.is_empty();
 
         instrs

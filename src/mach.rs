@@ -1,12 +1,21 @@
 //! Information about machine architectures
 //! The base trait of cmli is [`Machine`] from which all features are derived. This trait is dyn-compatible so it can be type-erased
 use crate::{
-    fmt::{self, PrettyPrinter}, helpers::{Bitset, BitsetIter, BitsetTy}, instr::{Instruction, RegisterKind}, intern::Symbol, traits::{AsId, IdType, IntoId, Name}
+    fmt::{self, PrettyPrinter},
+    helpers::{Bitset, BitsetIter, BitsetTy},
+    instr::{Instruction, RegisterKind},
+    intern::Symbol,
+    traits::{AsId, IdType, IntoId, Name},
 };
-use std::{borrow::Borrow, hash::Hasher, iter, num::NonZeroU64, ops::{Deref, DerefMut}};
+use std::{
+    borrow::Borrow,
+    hash::Hasher,
+    iter,
+    num::NonZeroU64,
+    ops::{Deref, DerefMut},
+};
 
 use crate::traits::AsRawId;
-
 
 #[derive(AsRawId, Copy, Clone, Debug, Hash, PartialEq, Eq, Name)]
 #[repr(u8)]
@@ -16,7 +25,7 @@ pub enum OneMachine {
     Singleton,
 }
 
-impl const AsId<MachineMode> for OneMachine {}
+const impl AsId<MachineMode> for OneMachine {}
 
 /// Array of [`MachineMode`] values containing solely [`OneMachine::Singleton`]
 pub const ONE_MACHINE: &[MachineMode] = as_id_array!([OneMachine::Singleton] => MachineMode);
@@ -24,7 +33,6 @@ pub const ONE_MACHINE: &[MachineMode] = as_id_array!([OneMachine::Singleton] => 
 /// Specification trait for providing information about CPU registers
 /// Can be combined with [`MachineSpec`] to implement the [`Registers`] trait
 pub trait RegisterSpec: AsId<Register> + Name + Sized {
-
     type MachineMode: AsId<MachineMode>;
 
     /// The Kind of the register
@@ -38,14 +46,13 @@ pub trait RegisterSpec: AsId<Register> + Name + Sized {
     fn category(&self, mode: Self::MachineMode) -> crate::xva::XvaCategory {
         use crate::xva::XvaCategory;
         match self.kind() {
-            RegisterKind::GeneralPurpose |
-            RegisterKind::IntegerOnly => XvaCategory::Int,
-            
+            RegisterKind::GeneralPurpose | RegisterKind::IntegerOnly => XvaCategory::Int,
+
             RegisterKind::ScalarFp => XvaCategory::Float,
-            RegisterKind::VectorAny |
-            RegisterKind::VectorInt |
-            RegisterKind::VectorFloat |
-            RegisterKind::VectorBit => XvaCategory::VectorAny,
+            RegisterKind::VectorAny
+            | RegisterKind::VectorInt
+            | RegisterKind::VectorFloat
+            | RegisterKind::VectorBit => XvaCategory::VectorAny,
             kind => XvaCategory::Custom(kind),
         }
     }
@@ -87,12 +94,17 @@ pub trait MachineSpec: Sized {
         None
     }
 
-    fn pretty_print_instr(&self, instr: Self::Opcode, mode: Self::MachineMode, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+    fn pretty_print_instr(
+        &self,
+        instr: Self::Opcode,
+        mode: Self::MachineMode,
+        f: &mut core::fmt::Formatter,
+    ) -> core::fmt::Result {
         f.write_str(instr.name())
     }
 
     #[cfg(feature = "xva")]
-    fn as_compiler(&self) -> Option<&dyn crate::compiler::CheckCompiler<Machine = Self>>{
+    fn as_compiler(&self) -> Option<&dyn crate::compiler::CheckCompiler<Machine = Self>> {
         None
     }
 }
@@ -202,7 +214,11 @@ impl<M: MachineSpec> Machine for M {
             }
 
             #[cfg(feature = "xva")]
-            fn register_category(&self, reg: Register, mode: MachineMode) -> crate::xva::XvaCategory {
+            fn register_category(
+                &self,
+                reg: Register,
+                mode: MachineMode,
+            ) -> crate::xva::XvaCategory {
                 match (
                     reg.downcast::<This::Register>(),
                     mode.downcast::<This::MachineMode>(),
@@ -237,7 +253,7 @@ impl<M: MachineSpec> Machine for M {
                 }
             }
 
-            fn __sealed(&self,) -> () {}
+            fn __sealed(&self) -> () {}
         }
     );
     machine_helper!(
@@ -246,18 +262,25 @@ impl<M: MachineSpec> Machine for M {
         }
     );
 
-    fn pretty_print_instr(&self, opc: Opcode, mode: MachineMode, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+    fn pretty_print_instr(
+        &self,
+        opc: Opcode,
+        mode: MachineMode,
+        f: &mut core::fmt::Formatter,
+    ) -> core::fmt::Result {
         let instr = opc.downcast().expect("Unknown Opcode");
         let mode = mode.downcast().expect("Unknown Machine Mode");
         <Self as MachineSpec>::pretty_print_instr(&self, instr, mode, f)
     }
-    
+
     fn feature_bit(&self, name: &str) -> u32 {
-        let bit = <<Self as MachineSpec>::TargetFeature>::from_name(name).unwrap_or_else(|| panic!("Unknown Target Feature \"{name}\"")).feature_to_bit();
+        let bit = <<Self as MachineSpec>::TargetFeature>::from_name(name)
+            .unwrap_or_else(|| panic!("Unknown Target Feature \"{name}\""))
+            .feature_to_bit();
 
         bit
     }
-    
+
     fn feature_name(&self, bit: u32) -> Option<&'static str> {
         <<Self as MachineSpec>::TargetFeature>::feature_from_bit(bit).map(|n| n.name())
     }
@@ -280,7 +303,12 @@ pub trait Machine {
         None
     }
 
-    fn pretty_print_instr(&self, opc: Opcode, mode: MachineMode, f: &mut core::fmt::Formatter) -> core::fmt::Result;
+    fn pretty_print_instr(
+        &self,
+        opc: Opcode,
+        mode: MachineMode,
+        f: &mut core::fmt::Formatter,
+    ) -> core::fmt::Result;
 
     fn feature_bit(&self, name: &str) -> u32;
 
@@ -290,7 +318,6 @@ pub trait Machine {
     fn as_compiler(&self) -> Option<&dyn crate::compiler::Compiler> {
         None
     }
-
 }
 
 macro_rules! impl_machine_helper {
@@ -379,7 +406,7 @@ const REGSET_SIZE: usize = 8;
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Regset(Bitset<RegsetBit, REGSET_SIZE>);
 
-impl const Deref for Regset {
+const impl Deref for Regset {
     type Target = Bitset<RegsetBit, REGSET_SIZE>;
 
     fn deref(&self) -> &Self::Target {
@@ -387,7 +414,7 @@ impl const Deref for Regset {
     }
 }
 
-impl const DerefMut for Regset {
+const impl DerefMut for Regset {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -398,7 +425,10 @@ impl Regset {
         Self(Bitset::new())
     }
 
-    pub fn from_regids<R: IntoId<Register>>(iter: impl IntoIterator<Item = R>, mach: &dyn Machine) -> Self {
+    pub fn from_regids<R: IntoId<Register>>(
+        iter: impl IntoIterator<Item = R>,
+        mach: &dyn Machine,
+    ) -> Self {
         let mut array = Self::new();
 
         array.insert_regids(iter, mach);
@@ -417,12 +447,19 @@ impl Regset {
     pub fn insert_regid<R: IntoId<Register>>(&mut self, reg: R, mach: &dyn Machine) {
         let reg = reg.into_id();
 
-        let bit = mach.registers().regmap_bit(reg).expect("Cannot push register");
+        let bit = mach
+            .registers()
+            .regmap_bit(reg)
+            .expect("Cannot push register");
 
         self.insert_bit(RegsetBit(bit))
     }
 
-    pub fn insert_regids<R: IntoId<Register>>(&mut self, iter: impl IntoIterator<Item = R>, mach: &dyn Machine) {
+    pub fn insert_regids<R: IntoId<Register>>(
+        &mut self,
+        iter: impl IntoIterator<Item = R>,
+        mach: &dyn Machine,
+    ) {
         for reg in iter {
             self.insert_regid(reg, mach);
         }
@@ -431,12 +468,19 @@ impl Regset {
     pub fn remove_regid<R: IntoId<Register>>(&mut self, reg: R, mach: &dyn Machine) {
         let reg = reg.into_id();
 
-        let bit = mach.registers().regmap_bit(reg).expect("Cannot push register");
+        let bit = mach
+            .registers()
+            .regmap_bit(reg)
+            .expect("Cannot push register");
 
         self.remove_bit(RegsetBit(bit))
     }
 
-    pub fn remove_regids<R: IntoId<Register>>(&mut self, iter: impl IntoIterator<Item = R>, mach: &dyn Machine) {
+    pub fn remove_regids<R: IntoId<Register>>(
+        &mut self,
+        iter: impl IntoIterator<Item = R>,
+        mach: &dyn Machine,
+    ) {
         for reg in iter {
             self.remove_regid(reg, mach);
         }
@@ -445,24 +489,43 @@ impl Regset {
     pub fn contains_regid<R: IntoId<Register>>(&self, reg: R, mach: &dyn Machine) -> bool {
         let reg = reg.into_id();
 
-        let bit = mach.registers().regmap_bit(reg).expect("Cannot push register");
+        let bit = mach
+            .registers()
+            .regmap_bit(reg)
+            .expect("Cannot push register");
 
         self.contains_bit(RegsetBit(bit))
     }
 
-    pub fn contains_any_regids<R: IntoId<Register>>(&self, reg: impl IntoIterator<Item = R>, mach: &dyn Machine) -> bool {
+    pub fn contains_any_regids<R: IntoId<Register>>(
+        &self,
+        reg: impl IntoIterator<Item = R>,
+        mach: &dyn Machine,
+    ) -> bool {
         reg.into_iter().any(|r| self.contains_regid(r, mach))
     }
 
-    pub fn contains_all_regids<R: IntoId<Register>>(&self, reg: impl IntoIterator<Item = R>, mach: &dyn Machine) -> bool {
+    pub fn contains_all_regids<R: IntoId<Register>>(
+        &self,
+        reg: impl IntoIterator<Item = R>,
+        mach: &dyn Machine,
+    ) -> bool {
         reg.into_iter().all(|r| self.contains_regid(r, mach))
     }
 
-    pub fn into_regids<'a>(self, mach: &'a dyn Machine, mode: MachineMode) -> RegsetIntoRegisters<'a> {
+    pub fn into_regids<'a>(
+        self,
+        mach: &'a dyn Machine,
+        mode: MachineMode,
+    ) -> RegsetIntoRegisters<'a> {
         RegsetIntoRegisters(self.into_iter(), mach.registers(), mode)
     }
 
-    pub fn retain_all_regids<R: IntoId<Register>>(&mut self, reg: impl IntoIterator<Item = R>, mach: &dyn Machine) {
+    pub fn retain_all_regids<R: IntoId<Register>>(
+        &mut self,
+        reg: impl IntoIterator<Item = R>,
+        mach: &dyn Machine,
+    ) {
         let other = Self::from_regids(reg, mach);
 
         self.retain_mask(*other);
@@ -497,11 +560,17 @@ impl Regset {
         }
     }
 
-    pub fn contains_all_registers<R: RegisterSpec, I: IntoIterator<Item = R>>(&self, regs: I) -> bool {
+    pub fn contains_all_registers<R: RegisterSpec, I: IntoIterator<Item = R>>(
+        &self,
+        regs: I,
+    ) -> bool {
         regs.into_iter().all(|r| self.contains_register(r))
     }
 
-    pub fn contains_any_registers<R: RegisterSpec, I: IntoIterator<Item = R>>(&self, regs: I) -> bool {
+    pub fn contains_any_registers<R: RegisterSpec, I: IntoIterator<Item = R>>(
+        &self,
+        regs: I,
+    ) -> bool {
         regs.into_iter().all(|r| self.contains_register(r))
     }
 }
@@ -536,7 +605,7 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, Regset> {
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct RegsetBit(u32);
 
-impl const BitsetTy for RegsetBit {
+const impl BitsetTy for RegsetBit {
     fn from_u32(val: u32) -> Self {
         Self(val)
     }
@@ -545,7 +614,11 @@ impl const BitsetTy for RegsetBit {
     }
 }
 
-pub struct RegsetIntoRegisters<'a>(BitsetIter<RegsetBit, REGSET_SIZE>, &'a dyn Registers, MachineMode);
+pub struct RegsetIntoRegisters<'a>(
+    BitsetIter<RegsetBit, REGSET_SIZE>,
+    &'a dyn Registers,
+    MachineMode,
+);
 
 impl<'a> Iterator for RegsetIntoRegisters<'a> {
     type Item = Register;
@@ -566,11 +639,10 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, RegsetBit> {
     }
 }
 
-
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct FeatureBit(u32);
 
-impl const BitsetTy for FeatureBit {
+const impl BitsetTy for FeatureBit {
     fn from_u32(bit: u32) -> Self {
         Self(bit)
     }
@@ -583,7 +655,7 @@ impl const BitsetTy for FeatureBit {
 impl<'a> core::fmt::Display for PrettyPrinter<'a, FeatureBit> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Some(name) = self.1.feature_name(self.0.0) else {
-            return f.write_fmt(format_args!("/*UNKNOWN FEATURE {:02X}*/", self.0.0))
+            return f.write_fmt(format_args!("/*UNKNOWN FEATURE {:02X}*/", self.0.0));
         };
 
         f.write_str("\"")?;
@@ -603,7 +675,7 @@ impl Default for FeatureSet {
     }
 }
 
-impl const Deref for FeatureSet {
+const impl Deref for FeatureSet {
     type Target = Bitset<FeatureBit, FEATURESET_SIZE>;
 
     fn deref(&self) -> &Self::Target {
@@ -611,7 +683,7 @@ impl const Deref for FeatureSet {
     }
 }
 
-impl const DerefMut for FeatureSet {
+const impl DerefMut for FeatureSet {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -622,11 +694,21 @@ impl FeatureSet {
         Self(Bitset::new())
     }
 
-    pub fn from_names<S: AsRef<str>, I: IntoIterator<Item = S>>(iter: I, mach: &dyn Machine) -> Self {
-        iter.into_iter().map(|s| mach.feature_bit(s.as_ref())).map(FeatureBit).collect()
+    pub fn from_names<S: AsRef<str>, I: IntoIterator<Item = S>>(
+        iter: I,
+        mach: &dyn Machine,
+    ) -> Self {
+        iter.into_iter()
+            .map(|s| mach.feature_bit(s.as_ref()))
+            .map(FeatureBit)
+            .collect()
     }
 
-    pub fn insert_names<S: AsRef<str>, I: IntoIterator<Item = S>>(&mut self, iter: I, mach: &dyn Machine) {
+    pub fn insert_names<S: AsRef<str>, I: IntoIterator<Item = S>>(
+        &mut self,
+        iter: I,
+        mach: &dyn Machine,
+    ) {
         for name in iter {
             self.insert_name(name.as_ref(), mach)
         }
@@ -650,15 +732,29 @@ impl FeatureSet {
         self.remove_bit(FeatureBit(bit));
     }
 
-    pub fn contains_all_names<S: AsRef<str>, I: IntoIterator<Item = S>>(&self, iter: I, mach: &dyn Machine) -> bool {
-        iter.into_iter().all(|n| self.contains_name(n.as_ref(), mach))
+    pub fn contains_all_names<S: AsRef<str>, I: IntoIterator<Item = S>>(
+        &self,
+        iter: I,
+        mach: &dyn Machine,
+    ) -> bool {
+        iter.into_iter()
+            .all(|n| self.contains_name(n.as_ref(), mach))
     }
 
-    pub fn contains_any_names<S: AsRef<str>, I: IntoIterator<Item = S>>(&self, iter: I, mach: &dyn Machine) -> bool {
-        iter.into_iter().any(|n| self.contains_name(n.as_ref(), mach))
+    pub fn contains_any_names<S: AsRef<str>, I: IntoIterator<Item = S>>(
+        &self,
+        iter: I,
+        mach: &dyn Machine,
+    ) -> bool {
+        iter.into_iter()
+            .any(|n| self.contains_name(n.as_ref(), mach))
     }
 
-    pub fn remove_names<S: AsRef<str>, I: IntoIterator<Item = S>>(&mut self, iter: I, mach: &dyn Machine) {
+    pub fn remove_names<S: AsRef<str>, I: IntoIterator<Item = S>>(
+        &mut self,
+        iter: I,
+        mach: &dyn Machine,
+    ) {
         for item in iter {
             self.remove_name(item.as_ref(), mach)
         }
@@ -680,26 +776,38 @@ impl FeatureSet {
         let bit = feat.feature_to_bit();
 
         self.contains_bit(FeatureBit(bit))
-    } 
+    }
 
-    pub fn remove_features<F: TargetFeatureSpec, I: IntoIterator<Item: Borrow<F>>>(&mut self, iter: I) {
+    pub fn remove_features<F: TargetFeatureSpec, I: IntoIterator<Item: Borrow<F>>>(
+        &mut self,
+        iter: I,
+    ) {
         for feat in iter {
             self.remove_feature(feat.borrow())
         }
     }
 
-    pub fn contains_all_features<F: TargetFeatureSpec, I: IntoIterator<Item: Borrow<F>>>(&self, iter: I) -> bool {
+    pub fn contains_all_features<F: TargetFeatureSpec, I: IntoIterator<Item: Borrow<F>>>(
+        &self,
+        iter: I,
+    ) -> bool {
         iter.into_iter().all(|f| self.contains_feature(f.borrow()))
     }
 
-    pub fn contains_any_features<F: TargetFeatureSpec, I: IntoIterator<Item: Borrow<F>>>(&self, iter: I) -> bool {
+    pub fn contains_any_features<F: TargetFeatureSpec, I: IntoIterator<Item: Borrow<F>>>(
+        &self,
+        iter: I,
+    ) -> bool {
         iter.into_iter().any(|f| self.contains_feature(f.borrow()))
     }
 }
 
 impl<F: TargetFeatureSpec> FromIterator<F> for FeatureSet {
     fn from_iter<T: IntoIterator<Item = F>>(iter: T) -> Self {
-        iter.into_iter().map(|f| f.feature_to_bit()).map(FeatureBit).collect()
+        iter.into_iter()
+            .map(|f| f.feature_to_bit())
+            .map(FeatureBit)
+            .collect()
     }
 }
 

@@ -1,6 +1,9 @@
 //! Traits used by `cmli`
 use std::{
-    any::Any, hash::Hasher, marker::PhantomData, num::{NonZero, NonZeroU64}
+    any::Any,
+    hash::Hasher,
+    marker::PhantomData,
+    num::{NonZero, NonZeroU64},
 };
 
 /// Identifies types that have a statically known [`Name`]
@@ -27,13 +30,13 @@ pub const trait TryAsU64Raw: Sized {
     fn from_val(val: u64) -> Option<Self>;
 }
 
-impl const TryAsU64Raw for NonZeroU64 {
+const impl TryAsU64Raw for NonZeroU64 {
     fn from_val(val: u64) -> Option<Self> {
         Self::new(val)
     }
 }
 
-impl<A> const TryAsU64Raw for PhantomData<A> {
+const impl<A> TryAsU64Raw for PhantomData<A> {
     fn from_val(val: u64) -> Option<Self> {
         None
     }
@@ -120,12 +123,12 @@ pub const trait TryIntoU64Raw {
 macro_rules! impl_for_primitives {
     ($($prim:ident),*) => {
         $(
-            impl const TryIntoU64Raw for $prim {
+            const impl TryIntoU64Raw for $prim {
                 fn into_u64(self) -> u64 {
                     self as u64 & (1u64.unbounded_shl(Self::BITS).wrapping_sub(1))
                 }
             }
-            impl const TryAsU64Raw for $prim {
+            const impl TryAsU64Raw for $prim {
                 fn from_val(val: u64) -> Option<Self> {
                     if (val & (1u64.unbounded_shl(Self::BITS).wrapping_sub(1))) == val {
                         Some(val as $prim)
@@ -140,14 +143,14 @@ macro_rules! impl_for_primitives {
 
 impl_for_primitives!(u8, i8, u16, i16, u32, i32, u64, i64);
 
-impl<A> const TryIntoU64Raw for PhantomData<A> {
+const impl<A> TryIntoU64Raw for PhantomData<A> {
     fn into_u64(self) -> u64 {
         !0
     }
 }
 
 #[doc(hidden)]
-pub const fn try_into_u64<T: const TryIntoU64Raw>(val: T) ->  u64{
+pub const fn try_into_u64<T: const TryIntoU64Raw>(val: T) -> u64 {
     val.into_u64()
 }
 
@@ -160,18 +163,19 @@ pub const trait IntoId<T: [const] IdType> {
     fn into_id(self) -> T;
 }
 
-
-impl<T: [const] IdType, R: [const] AsId<T>> const IntoId<T> for R {
+const impl<T: [const] IdType, R: [const] AsId<T>> IntoId<T> for R {
     fn into_id(self) -> T {
         T::new(self)
     }
 }
 
 /// And [`IdType`] is a specialized type that conceptually stores two values: A type key, which is a [`NonZeroU64`], and a `u64`
-/// [`IdType`]s can be constructed from types that implement [`AsId<Self>`], and can be (checked) downcast into such types. 
-/// 
+/// [`IdType`]s can be constructed from types that implement [`AsId<Self>`], and can be (checked) downcast into such types.
+///
 /// This trait is sealed: It can only be implemented via the derive macro [`IdType!`]
-pub const unsafe trait IdType: Copy + core::hash::Hash + Eq + [const] IntoId<Self> {
+pub const unsafe trait IdType:
+    Copy + core::hash::Hash + Eq + [const] IntoId<Self>
+{
     #[doc(hidden)]
     fn into_raw_parts(self) -> (NonZeroU64, u64);
     #[doc(hidden)]
@@ -202,7 +206,6 @@ pub const fn raw_id_type(x: u64) -> NonZeroU64 {
     }
 }
 
-
 mod macros {
     /// Derive macro for [`AsRawId`][super::AsRawId] currently supports enums with only unit variants, enums with variants that store a small (u32 or smaller) value, and structs that store a single `u64` or smaller
     #[macro_export]
@@ -217,7 +220,7 @@ mod macros {
                     $($(#[$var_meta])* $var_name $(= $discrim)?),*
                 }
 
-                unsafe impl$(< $(const $__mach: $__gen_ty),*>)? const $crate::traits::AsRawId for $name $(<$($__mach),*>)? {
+                const unsafe impl$(< $(const $__mach: $__gen_ty),*>)? $crate::traits::AsRawId for $name $(<$($__mach),*>)? {
                     const TYPE: ::core::num::NonZeroU64 = $crate::traits::raw_id_type($crate::traits::hash_string_const($crate::macros::rand_u64!(enum $name {
                         $($var_name $(= $discrim)?),*
                     }), ::core::concat!(::core::module_path!(), "::", ::core::stringify!($name), $("\0", ::core::stringify!($var_name)),*)));
@@ -255,7 +258,7 @@ mod macros {
                 const fn __test<__T: $crate::traits::TryAsU64Raw>() {}
                 __test::<$field_ty>();
             };
-            unsafe impl const $crate::traits::AsRawId for $name {
+            const unsafe impl $crate::traits::AsRawId for $name {
                 const TYPE: ::core::num::NonZeroU64 = $crate::traits::raw_id_type($crate::traits::hash_string_const($crate::macros::rand_u64!(struct $name ($field_ty);), ::core::concat!(::core::module_path!(), "::", ::core::stringify!($name),)));
 
                 fn into_raw_id(self) -> u64 {
@@ -279,17 +282,17 @@ mod macros {
     #[macro_export]
     macro_rules! IdType {
         derive() ($(#[$meta:meta])* $vis:vis struct $name:ident($nz_ty:ty, u64);) => {
-            impl const $crate::traits::IntoId<$name> for $name {
+            const impl $crate::traits::IntoId<$name> for $name {
                 fn into_id(self) -> $name {
                     self
                 }
             }
-            impl const $crate::traits::IntoId<$name> for &$name {
+            const impl $crate::traits::IntoId<$name> for &$name {
                 fn into_id(self) -> $name {
                     *self
                 }
             }
-            unsafe impl const $crate::traits::IdType for $name {
+            const unsafe impl $crate::traits::IdType for $name {
                 fn into_raw_parts(self) -> (::core::num::NonZeroU64, u64) {
                     (self.0, self.1)
                 }
@@ -341,7 +344,7 @@ pub const trait BitfieldEncodable {
 macro_rules! impl_encodable_primitives {
     ($($uty:ident => $sty:ident),+ $(,)?) => {
         $(
-            impl const BitfieldEncodable for $uty {
+            const impl BitfieldEncodable for $uty {
                 const MAX_WIDTH: u32 = $uty::BITS;
 
                 fn encode_bits(&self) -> u128 {
@@ -353,7 +356,7 @@ macro_rules! impl_encodable_primitives {
                 }
             }
 
-            impl const BitfieldEncodable for $sty {
+            const impl BitfieldEncodable for $sty {
                 const MAX_WIDTH: u32 = $uty::BITS;
 
                 fn encode_bits(&self) -> u128 {
@@ -370,7 +373,7 @@ macro_rules! impl_encodable_primitives {
     }
 }
 
-impl_encodable_primitives!{
+impl_encodable_primitives! {
     u8 => i8,
     u16 => i16,
     u32 => i32,
@@ -378,7 +381,7 @@ impl_encodable_primitives!{
     u128 => i128,
 }
 
-impl const BitfieldEncodable for bool {
+const impl BitfieldEncodable for bool {
     const MAX_WIDTH: u32 = 1;
 
     fn decode_bits(val: u128, _: u32) -> Self {

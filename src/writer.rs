@@ -1,9 +1,8 @@
-
-use std::io::{Write, Result};
+use std::io::{Result, Write};
 
 use crate::{instr::Instruction, reloc::RelocValue};
 
-pub trait RelocatableWriter : Write {
+pub trait RelocatableWriter: Write {
     fn write_with_reloc(&mut self, data: &[u8], reloc: RelocValue) -> Result<()>;
 }
 

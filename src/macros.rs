@@ -42,7 +42,7 @@ macro_rules! nzlit {
                 panic!("Zero constant produced when non-zero value is expected");
             }
 
-            unsafe { $crate::macros::__NonZero::new_unchecked(__val)}
+            unsafe { $crate::macros::__NonZero::new_unchecked(__val) }
         }
-    }
+    };
 }
