@@ -129,7 +129,7 @@ macro_rules! machine_helper {
     (fn $method:ident(&self) -> $ty_name:ident {
         $assoc_const:ident
     } $(impl <$ident:ident> $trait:ident {
-        $($(#[$inmeta:meta])* fn $fname:ident(&self, $($param:ident: $param_ty:ty),*) -> $ret_ty:ty $block:block)*
+        $($(#[$inmeta:meta])* fn $fname:ident(&self, $($param:ident: $param_ty:ty),* $(,)?) -> $ret_ty:ty $block:block)*
     })?) => {
         fn $method(&self) -> <(&(dyn DynList<$ty_name> + '_), $(&(dyn $trait + '_))?) as TyOrDefault>::Type {
             struct ListHelper<M>(core::marker::PhantomData<M>);
@@ -253,7 +253,7 @@ impl<M: MachineSpec> Machine for M {
                 }
             }
 
-            fn __sealed(&self) -> () {}
+            fn __sealed(&self,) -> () {}
         }
     );
     machine_helper!(
