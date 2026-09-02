@@ -13,7 +13,7 @@ use crate::{
 };
 
 #[cfg(feature = "xva")]
-use crate::{compiler::CompilerSpec, xva::XvaCategory};
+use crate::{compiler::CompilerSpec, mach::CompilerWrapper, xva::XvaCategory};
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, AsRawId)]
 pub struct W65Mode(u32);
@@ -329,7 +329,7 @@ impl<const Kind: M65Kind> MachineSpec for M65Machine<Kind> {
     }
 
     #[cfg(feature = "xva")]
-    fn as_compiler(&self) -> Option<&dyn crate::compiler::CheckCompiler<Machine = Self>> {
-        core::any::try_as_dyn(self)
+    fn as_compiler(&self) -> Option<CompilerWrapper<'_, Self>> {
+        CompilerWrapper::cast_machine(self)
     }
 }

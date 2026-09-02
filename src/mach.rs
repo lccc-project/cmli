@@ -1,18 +1,10 @@
 //! Information about machine architectures
 //! The base trait of cmli is [`Machine`] from which all features are derived. This trait is dyn-compatible so it can be type-erased
 use crate::{
-    fmt::{self, PrettyPrinter},
-    helpers::{Bitset, BitsetIter, BitsetTy},
-    instr::{Instruction, RegisterKind},
-    intern::Symbol,
-    traits::{AsId, IdType, IntoId, Name},
+    compiler::{Compiler, CompilerSpec}, fmt::{self, PrettyPrinter}, helpers::{Bitset, BitsetIter, BitsetTy}, instr::{Instruction, RegisterKind}, intern::Symbol, traits::{AsId, IdType, IntoId, Name},
 };
 use std::{
-    borrow::Borrow,
-    hash::Hasher,
-    iter,
-    num::NonZeroU64,
-    ops::{Deref, DerefMut},
+    any::try_as_dyn, borrow::Borrow, hash::Hasher, iter, marker::PhantomData, num::NonZeroU64, ops::{Deref, DerefMut},
 };
 
 use crate::traits::AsRawId;
@@ -78,6 +70,20 @@ pub trait TargetFeatureSpec: Name + Sized {
     fn from_name(name: &str) -> Option<Self>;
 }
 
+pub struct CompilerWrapper<'a, M>(&'a dyn Compiler, PhantomData<M>);
+
+impl<'a, M: MachineSpec> CompilerWrapper<'a, M> {
+    /// Trys to downcast `M` to `Compiler`. 
+    pub fn cast_machine(m: &'a M) -> Option<Self> {
+        try_as_dyn(m).map(|r| Self(r, PhantomData))
+    }
+
+    /// 
+    pub fn from_spec<C: CompilerSpec<Machine = M>>(c: &'a C) -> Option<Self> {
+        Some(Self(c, PhantomData))
+    }
+}
+
 pub trait MachineSpec: Sized {
     type Opcode: AsId<Opcode> + Name;
     const OPCODES: &[Opcode];
@@ -104,7 +110,7 @@ pub trait MachineSpec: Sized {
     }
 
     #[cfg(feature = "xva")]
-    fn as_compiler(&self) -> Option<&dyn crate::compiler::CheckCompiler<Machine = Self>> {
+    fn as_compiler(&self) -> Option<CompilerWrapper<'_, Self>> {
         None
     }
 }
@@ -288,7 +294,7 @@ impl<M: MachineSpec> Machine for M {
     #[cfg(feature = "xva")]
     fn as_compiler(&self) -> Option<&dyn crate::compiler::Compiler> {
         match <Self as MachineSpec>::as_compiler(self) {
-            Some(c) => Some(c),
+            Some(c) => Some(c.0),
             None => None,
         }
     }

@@ -15,8 +15,7 @@ use crate::{
 
 #[cfg(feature = "xva")]
 use crate::{
-    compiler::{CompilerContext, CompilerSpec},
-    xva::{BinaryOp, RightShiftMode, XvaCategory, XvaOperand, XvaRegister, XvaStatement},
+    compiler::{CompilerContext, CompilerSpec}, mach::CompilerWrapper, xva::{BinaryOp, RightShiftMode, XvaCategory, XvaOperand, XvaRegister, XvaStatement},
 };
 
 pub type SkyarchMachine = OneMachine;
@@ -1383,8 +1382,8 @@ impl MachineSpec for Skyarch {
     }
 
     #[cfg(feature = "xva")]
-    fn as_compiler(&self) -> Option<&dyn crate::compiler::CheckCompiler<Machine = Self>> {
-        Some(self)
+    fn as_compiler(&self) -> Option<CompilerWrapper<'_, Self>> {
+        CompilerWrapper::from_spec(self)
     }
 }
 

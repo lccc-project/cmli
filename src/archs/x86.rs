@@ -13,8 +13,7 @@ use crate::{
 
 #[cfg(feature = "xva")]
 use crate::{
-    compiler::{CompilerContext, CompilerSpec},
-    xva::{
+    compiler::{CompilerContext, CompilerSpec}, mach::CompilerWrapper, xva::{
         BinaryOp, RightShiftMode, XvaCategory, XvaOpcode, XvaOperand, XvaRegister, XvaStatement,
     },
 };
@@ -999,8 +998,10 @@ impl MachineSpec for X86 {
     }
 
     #[cfg(feature = "xva")]
-    fn as_compiler(&self) -> Option<&dyn crate::compiler::CheckCompiler<Machine = Self>> {
-        Some(self)
+    fn as_compiler(&self) -> Option<CompilerWrapper<'_, X86>> {
+        use crate::mach::CompilerWrapper;
+
+        CompilerWrapper::from_spec(self)
     }
 }
 

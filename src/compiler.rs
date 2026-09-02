@@ -1,5 +1,5 @@
 //! Compilation support for architectures
-use std::{collections::HashSet, num::NonZeroU64};
+use std::{any::TryAsDynCompatible, collections::HashSet, num::NonZeroU64};
 
 use crate::{
     instr::{Address, AddressKind, Instruction},
@@ -62,21 +62,6 @@ pub trait CompilerSpec: MachineSpec {
 
         reg.downcast().expect("Bad register kind")
     }
-}
-
-pub trait CheckCompiler: Compiler {
-    type Machine: Machine;
-
-    #[doc(hidden)]
-    fn __check()
-    where
-        Self: Sized + CompilerSpec;
-}
-
-impl<C: CompilerSpec> CheckCompiler for C {
-    type Machine = C::Machine;
-
-    fn __check() {}
 }
 
 pub struct CompilerContext {
