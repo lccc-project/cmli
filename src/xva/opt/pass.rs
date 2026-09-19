@@ -312,7 +312,8 @@ impl XvaStatementOpt for FoldRegisterPass {
                 }
                 _ => {}
             },
-            XvaStatement::Fallthrough(_) => {}
+            xva::XvaStatement::Fallthrough(_) => {}
+            xva::XvaStatement::Breakpoint => {}
         }
     }
 }
@@ -446,6 +447,8 @@ impl RemoveUnused {
                         }
                         crate::instr::Operand::AbsSymbol(_, _)
                         | crate::instr::Operand::RelSymbol(_, _)
+                        | crate::instr::Operand::AbsSymbolSpan(_, _, _)
+                        | crate::instr::Operand::RelSymbolSpan(_, _, _)
                         | crate::instr::Operand::Immediate(_) => {}
 
                         crate::instr::Operand::Memory(memory_operand) => {
@@ -476,7 +479,8 @@ impl RemoveUnused {
                 }
                 _ => {}
             },
-            XvaStatement::Fallthrough(_) => {}
+            xva::XvaStatement::Fallthrough(_) => {}
+            xva::XvaStatement::Breakpoint => {}
         }
     }
 

@@ -836,6 +836,18 @@ x86_instructions! {
             [] => 0xC3,
             [_ @ Immediate] => 0xC2
         }
+        Int3 ("int3") {
+            [] => 0xCC
+        }
+        Int1 ("int1") {
+            [] => 0xF1
+        }
+        IntO ("into") {
+            [] => 0xCE
+        }
+        Int ("int") {
+            [_ @ Immediate] => 0xCD,
+        }
     }
 }
 
@@ -1338,7 +1350,7 @@ impl CompilerSpec for X86 {
             XvaStatement::Return => Instruction::new_nullary(X86Opcode::Ret),
             XvaStatement::Trap(_) => Instruction::new_nullary(X86Opcode::Ud2),
             XvaStatement::Noop(_) => todo!("special noop"),
-
+            XvaStatement::Breakpoint => Instruction::new_nullary(X86Opcode::Int3),
             _ => unreachable!(),
         };
 

@@ -70,6 +70,7 @@ pub trait TargetFeatureSpec: Name + Sized {
     fn from_name(name: &str) -> Option<Self>;
 }
 
+#[repr(transparent)]
 pub struct CompilerWrapper<'a, M>(&'a dyn Compiler, PhantomData<M>);
 
 impl<'a, M: MachineSpec> CompilerWrapper<'a, M> {

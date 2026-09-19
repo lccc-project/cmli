@@ -150,6 +150,7 @@ pub enum XvaStatement {
     Elaborated(Vec<XvaStatement>),
     Use(Vec<XvaRegister>, UseKind),
     Fallthrough(Symbol),
+    Breakpoint,
 }
 
 impl Default for XvaStatement {
@@ -207,6 +208,7 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaStatement> {
                 pretty_print_list(reg, ", ", self.1, self.2)
             )),
             XvaStatement::Fallthrough(name) => f.write_fmt(format_args!("fallthrough {name}")),
+            XvaStatement::Breakpoint => f.write_str("breakpoint"),
         }
     }
 }
@@ -565,6 +567,10 @@ pub struct XvaType {
     pub size: u64,
     pub align: u64,
     pub category: XvaCategory,
+}
+
+impl XvaType {
+    pub const VOID: Self = Self {size: 0, align: 1, category: XvaCategory::Null};
 }
 
 impl core::fmt::Display for XvaType {

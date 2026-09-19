@@ -1,10 +1,7 @@
-use std::num::{NonZeroI64, NonZeroU32};
+use std::{num::{NonZeroI64, NonZeroU32}, range::Range};
 
 use crate::{
-    fmt::{PrettyPrinter, pretty_print_list},
-    intern::Symbol,
-    mach::{MachineMode, Opcode, Register},
-    traits::{AsId, IdType, IntoId},
+    fmt::{PrettyPrinter, pretty_print_list}, intern::Symbol, mach::{MachineMode, Opcode, Register}, reloc::RelocSpan, traits::{AsId, IdType, IntoId},
 };
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
@@ -90,7 +87,9 @@ pub enum Operand {
     Register(Register),
     Immediate(u128),
     AbsSymbol(RelocSym, Option<NonZeroI64>),
+    AbsSymbolSpan(RelocSym, Option<NonZeroI64>, Range<u8>),
     RelSymbol(RelocSym, Option<NonZeroI64>),
+    RelSymbolSpan(RelocSym, Option<NonZeroI64>, Range<u8>),
     Memory(MemoryOperand),
 }
 
@@ -128,6 +127,34 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, Operand> {
                 Ok(())
             }
             Operand::Memory(memory_operand) => PrettyPrinter(memory_operand, self.1, self.2).fmt(f),
+            Operand::AbsSymbolSpan(address, disp, span) => {
+                f.write_str("abs ")?;
+                address.fmt(f)?;
+                if let Some(val) = disp {
+                    if val.get() < 0 {
+                        let val = val.get().unsigned_abs();
+                        f.write_fmt(format_args!(" - {val}"))?;
+                    } else {
+                        f.write_fmt(format_args!(" + {val}"))?;
+                    }
+                }
+
+                f.write_fmt(format_args!("{}..{}", span.start, span.end))
+            },
+            Operand::RelSymbolSpan(address, disp, span) => {
+                f.write_str("rel ")?;
+                address.fmt(f)?;
+                if let Some(val) = disp {
+                    if val.get() < 0 {
+                        let val = val.get().unsigned_abs();
+                        f.write_fmt(format_args!(" - {val}"))?;
+                    } else {
+                        f.write_fmt(format_args!(" + {val}"))?;
+                    }
+                }
+
+                f.write_fmt(format_args!("{}..{}", span.start, span.end))
+            },
         }
     }
 }

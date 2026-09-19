@@ -1175,6 +1175,13 @@ impl core::fmt::Display for SkyarchInstruction {
                 dest.fmt(f)?;
                 f.write_str(", ")
             }
+            SkyarchInstruction::Halt { mm } => {
+                f.write_str("halt ")?;
+                mm.fmt(f)
+            },
+            SkyarchInstruction::Breakp {} => {
+                f.write_str("breakp")
+            },
         }
     }
 }
@@ -1329,6 +1336,8 @@ skyarch_opcodes! {
         CpiEf "cpief" {!coproc: SkyarchCoprocessor, func @ 0..6: u8, payload @ 6..20: u32} = 0x30..0x38,
         NcpiEf "ccpief" {!coproc: SkyarchCoprocessor, func @ 0..6: u8, payload @ 6..20: u32} = 0x38..0x40,
 
+        Halt "halt" {mm @ 0..2: u8} = 0x40,
+        Breakp "breakp" {} = 0x41,
 
         UndFF "und" = 0xFF,
 
@@ -1438,6 +1447,9 @@ impl CompilerSpec for Skyarch {
     ) {
         let mut preamble = Vec::new();
         match &*stmt {
+            crate::xva::XvaStatement::Breakpoint => {
+                *stmt = XvaStatement::RawInstr(Instruction::new_nullary(SkyarchInstruction::Breakp {}));
+            }
             crate::xva::XvaStatement::Expr(expr) => {
                 let dest = Self::areg(expr.dest);
                 let instr = match expr.op {

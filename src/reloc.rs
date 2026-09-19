@@ -11,11 +11,17 @@ pub enum OverflowKind {
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, Default)]
 pub struct RelocSpan {
+    /// The total number of bytes covered by the relocation, including bits that are referenced by the relocation, but not modified by it
     pub byte_width: u8,
+    /// The first bit that will be modified by the relocation
     pub bit_offset: u8,
+    /// The width of the modification, in bits
     pub bit_width: u8,
+    /// The number of low order bits discarded from the address
     pub bit_shift: u8,
-    pub pcrel_offset: u8,
+    /// The offset (from the address of the relocation) where the program counter value is calculated for a PC Relative relocation
+    pub pcrel_offset: i8,
+    /// Determines how to report overflow errors (if any).
     pub overflow_kind: OverflowKind,
     #[doc(hidden)]
     pub __non_exhaustive: (),
@@ -41,12 +47,16 @@ pub struct RelocationType(NonZero<u64>, u64);
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum RelocationKind {
+    /// A relocation that performs no operation
     #[default]
     Null,
+    /// A relocation against the absolute address
     Absolute(RelocSpan),
     Pcrel(RelocSpan),
     GotPcrel(RelocSpan),
+    GotAbs(RelocSpan),
     Plt(RelocSpan),
+    PltAbs(RelocSpan),
     GotDisp(RelocSpan),
     Tpoff(RelocSpan),
     GottpOff(RelocSpan),

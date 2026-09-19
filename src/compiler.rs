@@ -62,6 +62,10 @@ pub trait CompilerSpec: MachineSpec {
 
         reg.downcast().expect("Bad register kind")
     }
+
+    fn push_instruction(stmts: &mut Vec<XvaStatement>, instr: Instruction) {
+        stmts.push(XvaStatement::RawInstr(instr));
+    }
 }
 
 pub struct CompilerContext {
