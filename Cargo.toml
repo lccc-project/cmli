@@ -12,6 +12,7 @@ cmli-proc-macro.path = "cmli-proc-macro"
 paste = "1.0.15"
 bitflags = "2.10.0"
 bitfield-struct = "0.13.0"
+indexmap = "2.14.2"
 
 [workspace]
 members = ["cmli-proc-macro"]

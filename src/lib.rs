@@ -68,4 +68,4 @@ pub mod helpers;
 pub mod reloc;
 
 pub mod reader;
-pub mod writer;
+pub mod file;

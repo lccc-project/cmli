@@ -1,7 +1,7 @@
 use std::{num::{NonZeroI64, NonZeroU32}, range::Range};
 
 use crate::{
-    fmt::{PrettyPrinter, pretty_print_list}, intern::Symbol, mach::{MachineMode, Opcode, Register}, reloc::RelocSpan, traits::{AsId, IdType, IntoId},
+    fmt::{PrettyPrinter, pretty_print_list}, intern::Symbol, mach::{MachineMode, Opcode, Register}, reloc::{RelocSpan, RelocationKind}, traits::{AsId, IdType, IntoId},
 };
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
@@ -51,6 +51,10 @@ impl Instruction {
 
     pub fn opcode(&self) -> Opcode {
         self.backing
+    }
+
+    pub fn opcode_as<O: const AsId<Opcode>>(&self) -> Option<O> {
+        self.backing.downcast()
     }
 
     pub fn operands(&self) -> &[Operand] {
@@ -270,4 +274,22 @@ pub enum AddressKind {
     DTpoff,
     TlsDesc,
     LTlsDesc,
+}
+
+impl AddressKind {
+    pub fn into_reloc(self, span: RelocSpan, is_rel: bool) -> RelocationKind {
+        match (self, is_rel) {
+            (AddressKind::Default, false) => RelocationKind::Absolute(span),
+            (AddressKind::Default, true) => RelocationKind::Pcrel(span),
+            (AddressKind::GotRel, true) => RelocationKind::GotPcrel(span),
+            (AddressKind::GotAbs, false) => RelocationKind::GotAbs(span),
+            (AddressKind::Plt, true) => RelocationKind::Plt(span),
+            (AddressKind::Plt, false) => RelocationKind::PltAbs(span),
+            (AddressKind::Tpoff, false) => RelocationKind::Tpoff(span),
+            (AddressKind::DTpoff, true) => RelocationKind::GottpOff(span),
+            (AddressKind::TlsDesc, true) => todo!(),
+            (AddressKind::LTlsDesc, true) => todo!(),
+            _ => panic!("Invalid reloc")
+        }
+    }
 }

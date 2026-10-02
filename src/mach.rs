@@ -1,7 +1,9 @@
 //! Information about machine architectures
 //! The base trait of cmli is [`Machine`] from which all features are derived. This trait is dyn-compatible so it can be type-erased
+#[cfg(feature = "asm")]
+use crate::asm::AsmInfo;
 use crate::{
-    compiler::{Compiler, CompilerSpec}, fmt::{self, PrettyPrinter}, helpers::{Bitset, BitsetIter, BitsetTy}, instr::{Instruction, RegisterKind}, intern::Symbol, traits::{AsId, IdType, IntoId, Name},
+    compiler::{Compiler, CompilerSpec}, fmt::{self, PrettyPrinter}, helpers::{Bitset, BitsetIter, BitsetTy}, instr::{Instruction, RegisterKind}, intern::Symbol, traits::{AsId, IdType, IntoId, Name}, file::Encoder,
 };
 use std::{
     any::try_as_dyn, borrow::Borrow, hash::Hasher, iter, marker::PhantomData, num::NonZeroU64, ops::{Deref, DerefMut},
@@ -70,9 +72,11 @@ pub trait TargetFeatureSpec: Name + Sized {
     fn from_name(name: &str) -> Option<Self>;
 }
 
+#[cfg(feature = "xva")]
 #[repr(transparent)]
 pub struct CompilerWrapper<'a, M>(&'a dyn Compiler, PhantomData<M>);
 
+#[cfg(feature = "xva")]
 impl<'a, M: MachineSpec> CompilerWrapper<'a, M> {
     /// Trys to downcast `M` to `Compiler`. 
     pub fn cast_machine(m: &'a M) -> Option<Self> {
@@ -112,6 +116,15 @@ pub trait MachineSpec: Sized {
 
     #[cfg(feature = "xva")]
     fn as_compiler(&self) -> Option<CompilerWrapper<'_, Self>> {
+        None
+    }
+
+    #[cfg(feature = "asm")]
+    fn as_asm_info(&self) -> Option<&dyn AsmInfo> {
+        None
+    }
+
+    fn as_encoder(&self) -> Option<&dyn Encoder> {
         None
     }
 }
@@ -299,6 +312,15 @@ impl<M: MachineSpec> Machine for M {
             None => None,
         }
     }
+
+    #[cfg(feature = "asm")]
+    fn as_asm_info(&self) -> Option<&dyn AsmInfo> {
+        <Self as MachineSpec>::as_asm_info(self)
+    }
+
+    fn as_encoder(&self) -> Option<&dyn Encoder> {
+        <Self as MachineSpec>::as_encoder(self)
+    }
 }
 
 pub trait Machine {
@@ -323,6 +345,15 @@ pub trait Machine {
 
     #[cfg(feature = "xva")]
     fn as_compiler(&self) -> Option<&dyn crate::compiler::Compiler> {
+        None
+    }
+
+    #[cfg(feature = "asm")]
+    fn as_asm_info(&self) -> Option<&dyn AsmInfo> {
+        None
+    }
+
+    fn as_encoder(&self) -> Option<&dyn Encoder> {
         None
     }
 }

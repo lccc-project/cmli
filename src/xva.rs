@@ -1,13 +1,7 @@
 use std::num::NonZero;
 
 use crate::{
-    compiler::{Compiler, CompilerContext},
-    fmt::pretty_print_list,
-    instr::{Address, AddressKind, Instruction, MemoryOperand, Operand, RegisterKind, RelocSym},
-    intern::Symbol,
-    mach::{FeatureSet, Machine, MachineMode, Register, Regset},
-    traits::{AsId, IdType as _, IntoId},
-    xva,
+    compiler::{Compiler, CompilerContext}, file::{File, Section, SectionPermissions, SymDecl, SymDef, SymbolType, SymbolVisibility}, fmt::pretty_print_list, instr::{Address, AddressKind, Instruction, MemoryOperand, Operand, RegisterKind, RelocSym}, intern::Symbol, mach::{FeatureSet, Machine, MachineMode, Register, Regset}, reloc::RelocValue, traits::{AsId, IdType as _, IntoId}, xva,
 };
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -897,11 +891,18 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaFunctionDef> {
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum XvaSectionType {
+    ReadOnly,
+    ReadWrite,
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum XvaSection {
     Text,
     RoData,
     Data,
-    Explicit(Symbol),
+    Bss,
+    Explicit(Symbol, XvaSectionType),
     PrivateText,
     Common,
     TlsData,
@@ -923,18 +924,32 @@ impl core::fmt::Display for XvaSection {
             XvaSection::Text => f.write_str("text"),
             XvaSection::RoData => f.write_str("rodata"),
             XvaSection::Data => f.write_str("data"),
-            XvaSection::Explicit(name) => f.write_str(name.as_str()),
+            XvaSection::Explicit(name, ty) => {
+                f.write_str(name.as_str())?;
+                f.write_str(" ")?;
+                match ty {
+                    XvaSectionType::ReadOnly => f.write_str("(rodata)"),
+                    XvaSectionType::ReadWrite => f.write_str("(readwrite)"),
+                }
+            },
             XvaSection::PrivateText => f.write_str("private"),
             XvaSection::Common => f.write_str("common"),
             XvaSection::TlsData => f.write_str("tls data"),
+            XvaSection::Bss => f.write_str("bss"),
         }
     }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub enum XvaObjectBody {
+    Data(Vec<u8>),
+    Space(usize),
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct XvaObjectDef {
     pub ty: XvaType,
-    pub body: Vec<u8>,
+    pub body: XvaObjectBody,
     pub relocs: Vec<XvaRelocation>,
     pub linkage: Linkage,
     pub label: Symbol,
@@ -952,13 +967,20 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaObjectDef> {
         self.0.section.fmt(f)?;
         f.write_str(")")?;
 
-        for (i, b) in self.0.body.iter().enumerate() {
-            if (i & 15) == 0 {
-                f.write_str("\n\t")?;
-            } else {
-                f.write_str(" ")?;
-            }
-            f.write_fmt(format_args!("{b:02x}"))?;
+        match &self.0.body {
+            XvaObjectBody::Data(body) => {
+                for (i, b) in body.iter().enumerate() {
+                    if (i & 15) == 0 {
+                        f.write_str("\n\t")?;
+                    } else {
+                        f.write_str(" ")?;
+                    }
+                    f.write_fmt(format_args!("{b:02x}"))?;
+                }
+            },
+            XvaObjectBody::Space(n) => {
+                f.write_fmt(format_args!("\n\tspace {n}"))?;
+            },
         }
 
         f.write_str("\nend def ")?;
@@ -970,10 +992,174 @@ impl<'a> core::fmt::Display for PrettyPrinter<'a, XvaObjectDef> {
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct XvaRelocation {
     pub offset: usize,
-    pub addr: Address,
+    pub reloc: RelocValue,
 }
 
 use crate::fmt::PrettyPrinter;
 
 pub mod opt;
 pub mod regalloc;
+
+
+impl XvaFile {
+
+    fn xva_section_to_name(section: XvaSection, sym_name: Symbol) -> (SectionPermissions, Symbol) {
+        match section {
+            XvaSection::Text => (SectionPermissions::EXEC | SectionPermissions::READ, Symbol::intern(".text")),
+            XvaSection::RoData => (SectionPermissions::READ, Symbol::intern(".rodata")),
+            XvaSection::Data => (SectionPermissions::WRITE | SectionPermissions::READ, Symbol::intern(".data")),
+            XvaSection::Bss => (SectionPermissions::WRITE | SectionPermissions::READ, Symbol::intern(".bss")),
+            XvaSection::Explicit(name, ty) => (match ty {
+                XvaSectionType::ReadOnly => SectionPermissions::READ,
+                XvaSectionType::ReadWrite => SectionPermissions::WRITE | SectionPermissions::READ,
+            }, name),
+            XvaSection::PrivateText => (SectionPermissions::EXEC | SectionPermissions::READ, Symbol::intern(format!(".text.{sym_name}"))),
+            XvaSection::Common => (SectionPermissions::WRITE | SectionPermissions::READ, Symbol::intern("COMMON")),
+            XvaSection::TlsData => (SectionPermissions::WRITE | SectionPermissions::READ, Symbol::intern(".tdata")),
+        }
+    }
+
+    fn xva_section_to_obj_type(section: XvaSection) -> SymbolType {
+        match section {
+            XvaSection::Common => SymbolType::Common,
+            XvaSection::TlsData => SymbolType::Tls,
+            _ => SymbolType::Object
+        }
+    }
+
+    pub fn write_to_file(&self, file: &mut File, mach: &dyn Machine, mode: MachineMode) -> std::io::Result<()> {
+        for obj in &self.weak_decls {
+            file.define_symbol(*obj, || crate::file::SymDecl::ExternWeak(None));
+        }
+
+        for obj in &self.objects {
+            let (perms, sect) = Self::xva_section_to_name(obj.section, obj.label);
+            let section = file.get_or_create_section(sect, |name | {
+                match obj.section {
+                    
+                    XvaSection::Bss |
+                    XvaSection::Common => Section::create_bss(name),
+                    XvaSection::Text |
+                    XvaSection::RoData |
+                    XvaSection::Data |
+                    XvaSection::Explicit(_, _) | 
+                    XvaSection::PrivateText => Section::create_data(name, perms),
+                    
+                    XvaSection::TlsData => Section::create_tls(name),
+                }
+            });
+
+            section.require_permissions(perms)?;
+            section.align_section(obj.ty.align as usize)?;
+
+            let offset = section.offset();
+
+            for reloc in &obj.relocs {
+                section.write_relocation(reloc.offset as isize, reloc.reloc)?;
+            }
+
+            match &obj.body {
+                XvaObjectBody::Data(items) => section.write_bytes(items)?,
+                XvaObjectBody::Space(n) => section.write_zeros(*n)?,
+            }
+
+            file.define_symbol(obj.label, || SymDecl::Def(SymDef{
+                offset: offset,
+                section: sect,
+                ty: Self::xva_section_to_obj_type(obj.section),
+                size: obj.ty.size as usize,
+                linkage: match obj.linkage {
+                    Linkage::External => crate::file::SymbolLinkage::Global,
+                    Linkage::Internal => crate::file::SymbolLinkage::Local,
+                    Linkage::Weak => crate::file::SymbolLinkage::Weak,
+                },
+                // TODO: Better
+                visibility: match obj.linkage {
+                    Linkage::External => SymbolVisibility::DefaultGlobal,
+                    Linkage::Internal => SymbolVisibility::DsoLocal,
+                    Linkage::Weak => SymbolVisibility::Interposeable,
+                },
+                flags: 0,
+            }));
+        }
+
+        let encoder = mach.as_encoder();
+
+        for func in &self.functions {
+
+            let Some(encoder) = encoder else {
+                return Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "Cannot encode a function on this target"));
+            };
+
+            let (_, sect) = Self::xva_section_to_name(func.section, func.label);
+            let section = file.get_or_create_section(sect, |name | Section::create_data(name, SectionPermissions::READ | SectionPermissions::EXEC));
+        
+            section.require_permissions(SectionPermissions::EXEC)?;
+            encoder.align_instruction(section)?;
+
+            let offset = section.offset();
+
+            let mut cur_offset = offset;
+
+            for instr in &func.body.prologue {
+                cur_offset += encoder.encode_instr(section, instr, mode)?;
+            }
+
+            let mut label_offsets = Vec::new();
+
+            for bb in &func.body.body {
+                label_offsets.push((bb.label, cur_offset));
+
+                match &bb.body {
+                    XvaBlockBody::Statement(stmts) => {
+                        for stmt in stmts {
+                            match stmt {
+                                XvaStatement::RawInstr(instr) => {
+                                    cur_offset += encoder.encode_instr(section, instr, mode)?;
+                                },
+                                XvaStatement::OptGate(_, _) |
+                                XvaStatement::EndOptGate(_) |
+                                XvaStatement::Noop(_) |
+                                XvaStatement::Use(_, _) => {},
+                                _ => panic!("Complex XVA not adjusted in ")
+                            }
+                        }
+                    },
+                }
+            }
+
+            file.define_symbol(func.label, || SymDecl::Def(SymDef{
+                offset: offset,
+                section: sect,
+                ty: SymbolType::Function, // make this support ifunc eventually
+                size: cur_offset as usize,
+                linkage: match func.linkage {
+                    Linkage::External => crate::file::SymbolLinkage::Global,
+                    Linkage::Internal => crate::file::SymbolLinkage::Local,
+                    Linkage::Weak => crate::file::SymbolLinkage::Weak,
+                },
+                // TODO: Better
+                visibility: match func.linkage {
+                    Linkage::External => SymbolVisibility::DefaultGlobal,
+                    Linkage::Internal => SymbolVisibility::DsoLocal,
+                    Linkage::Weak => SymbolVisibility::Interposeable,
+                },
+                flags: 0,
+            }));
+
+            for (label, offset) in label_offsets {
+                file.define_symbol(func.label, || SymDecl::Def(SymDef{
+                offset: offset,
+                section: sect,
+                ty: SymbolType::Function, // make this support ifunc eventually
+                size: cur_offset as usize,
+                linkage: crate::file::SymbolLinkage::Local,
+                visibility: SymbolVisibility::DsoLocal,
+                flags: 0,
+            }));
+            }
+        }
+
+        Ok(())
+    }
+}

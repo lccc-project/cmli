@@ -2,13 +2,13 @@
 //!
 //! x86 is supported in 16-bit, 32-bit, and 64-bit mode.
 
+use std::num::NonZero;
+
 use crate::{
-    instr::{AddressKind, Instruction, Operand, RelocSym},
-    mach::{
+    archs::x86::encoding::{Disp, Evex, EvexExtra, LegacyPrefix, ModRM, Rex, Rm, Scale, SegmentOverride, Sib, SsePrefix, X86Instruction, X86Map, X86OpEncoding, X86RegnoR, X86RegnoV}, fmt::PrettyPrinter, instr::{Address, AddressKind, Instruction, MemoryOperand, Operand, RelocSym}, mach::{
         FeatureSet, MachineMode, MachineSpec, Opcode, Register, RegisterSpec, Regset,
         TargetFeatureSpec,
-    },
-    traits::{AsId, AsRawId, IdType, Name},
+    }, traits::{AsId, AsRawId, IdType, Name},
 };
 
 #[cfg(feature = "xva")]
@@ -17,6 +17,11 @@ use crate::{
         BinaryOp, RightShiftMode, XvaCategory, XvaOpcode, XvaOperand, XvaRegister, XvaStatement,
     },
 };
+
+pub mod encoding;
+
+#[cfg(feature = "asm")]
+pub mod asm;
 
 use crate::instr::RegisterKind;
 
@@ -31,6 +36,17 @@ pub enum X86Mode {
     Protected,
     /// 64-bit long mode
     Long,
+}
+
+impl core::fmt::Display for X86Mode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            X86Mode::Real => f.write_str("16-bit"),
+            X86Mode::Protected16 => f.write_str("16-bit (protected)"),
+            X86Mode::Protected => f.write_str("32-bit"),
+            X86Mode::Long => f.write_str("64-bit"),
+        }
+    }
 }
 
 impl X86Mode {
@@ -48,6 +64,13 @@ impl X86Mode {
             X86Mode::Protected16 => GprSize::Word,
             X86Mode::Protected => GprSize::Double,
             X86Mode::Long => GprSize::Quad,
+        }
+    }
+
+    pub const fn displacement_size(&self) -> GprSize {
+        match self {
+            X86Mode::Real | X86Mode::Protected16 => GprSize::Word,
+            X86Mode::Protected | X86Mode::Long => GprSize::Double,
         }
     }
 
@@ -71,6 +94,13 @@ impl X86Mode {
     /// Convience function for determining if the current mode supports arbitrary segmentation.
     pub const fn has_segmentation(&self) -> bool {
         !matches!(self, X86Mode::Long)
+    }
+
+    pub const fn default_op_size(&self) -> GprSize {
+        match self {
+            X86Mode::Real | X86Mode::Protected16 => GprSize::Word,
+            X86Mode::Protected | X86Mode::Long => GprSize::Double,
+        }
     }
 }
 
@@ -275,6 +305,24 @@ macro_rules! define_x86_registers {
                 }
             }
         }
+
+        impl $class_enum {
+            fn width(&self, m: X86Mode) -> u32 {
+                match self {
+                    $(Self::$class => ($(8 * $size,)? m.largest_gpr().bits(),).0),*
+                }
+            }
+
+            fn memsize(&self) -> u32 {
+                match self {
+                    $(#[allow(unreachable_code)] Self:: $class => {
+                        $(return $size;)?
+                        
+                        panic!("Not allowed as memory size");
+                    })*
+                }
+            }
+        }
     }
 }
 
@@ -418,6 +466,16 @@ pub enum GprName {
 }
 
 impl GprName {
+
+    pub const AX_REGNO: u8 = Self::ax as u8;
+    pub const CX_REGNO: u8 = Self::bx as u8;
+    pub const DX_REGNO: u8 = Self::dx as u8;
+    pub const BX_REGNO: u8 = Self::bx as u8;
+    pub const SP_REGNO: u8 = Self::sp as u8;
+    pub const BP_REGNO: u8 = Self::bp as u8;
+    pub const SI_REGNO: u8 = Self::si as u8;
+    pub const DI_REGNO: u8 = Self::di as u8;
+
     /// Converts to the corresponding [`X86Register`] given the [`GprSize`]
     ///
     /// [`sp`][GprName::sp], [`bp`][GprName::bp], [`si`][GprName::si], and [`di`][GprName::di] are only accessible as [`GprSize::Byte`] in [`X86Mode::Long`]
@@ -455,6 +513,16 @@ pub enum XmmSize {
     Ymm,
     /// The zmm (64-byte) register size
     Zmm,
+}
+
+impl core::fmt::Display for XmmSize {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            XmmSize::Xmm => f.write_str("xmm"),
+            XmmSize::Ymm => f.write_str("ymm"),
+            XmmSize::Zmm => f.write_str("zmm"),
+        }
+    }
 }
 
 impl X86Register {
@@ -500,7 +568,7 @@ impl X86Register {
     /// Obtains the [`GprSize`] of the current register, if it is a GPR, or returns [`None`] otherwise.
     pub const fn gpr_size(&self) -> Option<GprSize> {
         match self {
-            Self::Byte(_) | Self::ByteRex(_) => Some(GprSize::Byte),
+            Self::Byte(_) | Self::ByteRex(_) | Self::ByteLegacy(_) => Some(GprSize::Byte),
             Self::Word(_) => Some(GprSize::Word),
             Self::Double(_) => Some(GprSize::Double),
             Self::Quad(_) => Some(GprSize::Quad),
@@ -552,7 +620,7 @@ impl X86Register {
                 false
             }
             X86Register::Quad(_) if !is_64_bit => false,
-            X86Register::ByteRex(_) => false,
+            X86Register::ByteRex(_) if !is_64_bit => false,
             _ => true,
         }
     }
@@ -727,11 +795,155 @@ pub enum X86OperandKind {
     /// Register operand with the specified class
     Register(X86RegisterClass),
     /// Immediate operand
-    Immediate,
+    Immediate(X86RegisterClass),
     /// Memory operand with the specified data size
-    Memory(X86RegisterClass),
+    Memory(Option<X86RegisterClass>),
     /// Relative Address
-    RelAddr,
+    RelAddr(GprSize),
+    Vsib(Option<X86RegisterClass>),
+}
+
+impl X86OperandKind {
+    pub fn operand_matches(&self, op: &Operand, mode: X86Mode) -> bool {
+        match (self, op) {
+            (X86OperandKind::Register(rc), Operand::Register(reg)) => {
+                let reg: X86Register = reg.downcast().unwrap();
+
+                reg.class() == *rc
+            },
+            (X86OperandKind::Register(x86_register_class), _) => false,
+            (X86OperandKind::Immediate(cl), Operand::Immediate(val)) => {
+                let sval = (*val) as i128;
+                let sz = cl.memsize();
+
+                match sz {
+                    1 => (0..256).contains(val) | (-128..128).contains(&sval),
+                    2 => (0..65536).contains(val) | (-32768..32768).contains(&sval),
+                    4 => (0..((u32::MAX as u128)+1)).contains(val) | ((i32::MIN as i128)..((i32::MAX as i128) + 1)).contains(&sval),
+                    8 => (0..((u64::MAX as u128)+1)).contains(val) | ((i64::MIN as i128)..((i64::MAX as i128) + 1)).contains(&sval),
+                    10 => (0..((1 << 80))).contains(val) | ((!0 << 79)..(1 << 79)).contains(&sval),
+                    16 => true,
+                    _ => panic!("Size not allowed in immediate")
+                }
+            },
+            (X86OperandKind::Immediate(_), Operand::AbsSymbol(..)) |
+            (X86OperandKind::Immediate(_), Operand::RelSymbol(..)) => true,
+            (X86OperandKind::Immediate(_), _) => false,
+            (X86OperandKind::Memory(cl), Operand::Memory(mem)) => {
+                if let Some(cl) = cl {
+                    let sz = cl.memsize();
+
+                    if Some(sz as usize) != mem.value_size {
+                        return false;
+                    }
+                }
+
+                if mem.addr.rel && !mode.supports_rel_addr() {
+                    return false;
+                }
+
+                match mem.addr.index.and_then(Register::downcast::<X86Register>) {
+                    Some(X86Register::Word(_) | X86Register::Double(_) | X86Register::Quad(_)) => {}
+                    None => {}
+                    _ => return false
+                }
+
+                match mem.addr.scale.get() {
+                    1 | 2 | 4 | 8 => true,
+                    _ => false
+                }
+            },
+            (X86OperandKind::Memory(_), _) => false,
+            (X86OperandKind::RelAddr(sz), Operand::RelSymbol(_, _)) if *sz == mode.displacement_size() => true,
+            (X86OperandKind::RelAddr(_), _) => false,
+            (X86OperandKind::Vsib(cl), Operand::Memory(mem)) => {
+                if let Some((cl, value_size)) = cl.zip(mem.value_size) {
+                    let sz = cl.memsize() as usize;
+
+                    if sz != value_size {
+                        return false;
+                    }
+                }
+
+                if mem.addr.rel {
+                    return false;
+                }
+
+                match mem.addr.index.and_then(Register::downcast::<X86Register>) {
+                    Some(X86Register::Xmm(_) | X86Register::Ymm(_) | X86Register::Zmm(_)) => {}
+                    _ => return false
+                }
+
+                match mem.addr.scale.get() {
+                    1 | 2 | 4 | 8 => true,
+                    _ => false
+                }
+            }
+            (X86OperandKind::Vsib(_), _) => false,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum X86OperandEncoding {
+    Imp,
+    ImpMemSrc,
+    ImpMemDest,
+    Abs(GprSize),
+    Rel(GprSize),
+    Moff64,
+    AbsPtr(GprSize),
+    I(GprSize),
+    M,
+    R,
+    O,
+    Im4,
+    V,
+    K,
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum X86EvexEncodingKind {
+    Avx512 {w: bool, b: bool},
+    VexPromoted { w: bool, nf: bool},
+    LegacyPromoted {nf: bool},
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum X86EncodingPrefix {
+    Default,
+    Vex{w: bool},
+    Xop{w: bool},
+    Evex{evex_kind: X86EvexEncodingKind},
+}
+
+struct X86OpcodeSpec<'a> {
+    op_enc: &'a [X86OperandEncoding],
+    ops: &'a [Operand],
+    encoding_prefixes: &'a [X86EncodingPrefix],
+
+    opcode: u32,
+    op_ext: Option<X86RegnoR>,
+    op_size: Option<GprSize>,
+    def_op_size: GprSize,
+    addr_size: Option<GprSize>,
+    force_xmm_size: Option<XmmSize>,
+
+    allowed_prefixes: &'a [X86Opcode],
+}
+
+enum X86DefaultOpsizeMode {
+    Default,
+    Long,
+}
+
+impl X86DefaultOpsizeMode {
+    fn opsize(&self, mode: X86Mode) -> GprSize {
+        match self {
+            X86DefaultOpsizeMode::Default => mode.default_op_size(),
+            X86DefaultOpsizeMode::Long => mode.largest_gpr(),
+        }
+    }
 }
 
 macro_rules! x86_instructions {
@@ -739,8 +951,8 @@ macro_rules! x86_instructions {
         $(#[$meta:meta])*
         $vis:vis enum $name:ident {
             $(!prefix $(#[$prefix_meta:meta])* $prefix_name:ident ($prefix_mnemonic:literal) = $prefix_opcode:literal;)*
-            $($(#[$instr_meta:meta])*  $instr_name:ident ($mnemonic:literal) {
-                $([$($frag:tt @ $operand:pat),* $(,)?] $($mode:pat)? => $opcode:literal $(+ $regno:expr)?),+ $(,)?
+            $($(#[$instr_meta:meta])*  $instr_name:ident ($mnemonic:literal) $(osize $opsize_spec:ident)?{
+                $($(osize $osize:ident $(spec $instr_opsize_spec:ident)?)? $(asize $asize:ident)? $(xsize $xsize:ident)? $(prefixes [$($allowed_prefix:ident),* $(,)?])? [$($enc:ident $(($($enc_tt:tt)*))? @ $($op:ident $(($($op_tt:tt)*))?)|+),* $(,)?] $($mode:pat)? => $($($encoding_prefixes:ident $({$($encp_tt:tt)*})?)|+)? $opcode:literal $(/ $r_opext:literal)?),+ $(,)?
             })*
         }
     } => {
@@ -775,6 +987,61 @@ macro_rules! x86_instructions {
             }
         }
 
+        impl $name {
+            fn spec<'a>(&self, oprs: &'a [Operand], mode: X86Mode) -> Option<X86OpcodeSpec<'a>> {
+
+                #[allow(unused_imports)]
+                match *self {
+                    $(Self::$prefix_name => unreachable!(),)*
+                    $(
+                        Self::$instr_name => {
+                            let default_opsize = ($(const { X86DefaultOpsizeMode::$opsize_spec },)? X86DefaultOpsizeMode::Default,).0;
+                            $(
+                                if (|| {
+                                    $({use X86Mode::*; if let $mode = mode {} else {return false;}})?
+
+                                    true $( && 
+                                        ({
+                                            use X86RegisterClass::*;
+                                            use X86OperandKind::*;
+                                            let op = &oprs[${index()}];
+
+                                            $(({
+                                                let opkind = $op $(($($op_tt)*))?;
+
+                                                opkind.operand_matches(op, mode)
+                                            }))||+
+                                        })
+                                    )*
+                                })() {
+                                    use GprSize::*;
+                                    use X86OperandEncoding::*;
+
+                                    let per_spec_default_opsize = ($($(const { X86DefaultOpsizeMode:: $instr_opsize_spec},)?)? default_opsize,).0;
+
+                                    return Some(X86OpcodeSpec {
+                                        op_enc: const { &[$($enc $(($($enc_tt)*))?),*]},
+                                        encoding_prefixes: ($(const{&[$(X86EncodingPrefix:: $encoding_prefixes $(($($encp_tt)*))?),*]},)? const { &[X86EncodingPrefix::Default]},).0,
+                                        opcode: $opcode,
+                                        op_ext: ($(const { Some(X86RegnoR::new($r_opext))},)? None::<X86RegnoR>,).0,
+                                        ops: oprs,
+                                        op_size: ($(const {Some($osize)},)? None::<GprSize>,).0,
+                                        addr_size: ($(const {Some($asize)},)? None::<GprSize>,).0,
+                                        def_op_size: per_spec_default_opsize.opsize(mode),
+                                        allowed_prefixes: const { &[$($($allowed_prefix),*)?]},
+                                        force_xmm_size: ($(const { Some($xsize)},)? None::<XmmSize>,).0,
+                                    })
+
+                                }
+                            )*
+
+                            None
+                        }
+                    )*
+                }
+            }
+        }
+
     };
 }
 
@@ -784,10 +1051,6 @@ x86_instructions! {
         !prefix
         Lock ("lock") = 0xF0;
         !prefix
-        AddrOverride ("addro") = 0x67;
-        !prefix
-        DataOverride ("datao") = 0x66;
-        !prefix
         Repnz ("repnz") = 0xF2;
         !prefix
         Repz ("repz") = 0xF3;
@@ -795,46 +1058,62 @@ x86_instructions! {
         Rep ("rep") = 0xF3;
         !prefix
         Wait ("fwait") = 0x9B;
+        !prefix
+        BranchNotTaken("ntaken") = 0x2E;
+        !prefix
+        BranchTaken("taken") = 0x3E;
         Add ("add") {
-            [_ @ Memory(X86RegisterClass::Byte) | Register(X86RegisterClass::Byte), _ @ Register(X86RegisterClass::Byte)] => 0x00,
+            [M @ Memory(Some(Byte)) | Register(Byte), R @ Register(Byte)] => 0x00,
+            [M @ Memory(Some(Word)) | Register(Word) | Memory(Some(Double)) | Register(Double) | Memory(Some(Quad)) | Register(Quad), I(Byte) @ Immediate(Byte)] => 0x83 /0,
         }
         Sub ("sub") {
-            [_ @ Memory(X86RegisterClass::Byte) | Register(X86RegisterClass::Byte), _ @ Register(X86RegisterClass::Byte)] => 0x28,
+            [M @ Memory(Some(Byte)) | Register(Byte), R @ Register(Byte)] => 0x28,
+            [M @ Memory(Some(Word)) | Register(Word) | Memory(Some(Double)) | Register(Double) | Memory(Some(Quad)) | Register(Quad), I(Byte) @ Immediate(Byte)] => 0x83 /5,
         }
         Or ("sub") {
-            [_ @ Memory(X86RegisterClass::Byte) | Register(X86RegisterClass::Byte), _ @ Register(X86RegisterClass::Byte)] => 0x08,
+            [M @ Memory(Some(Byte)) | Register(Byte), R @ Register(Byte)] => 0x08,
         }
         And ("and") {
-            [_ @ Memory(X86RegisterClass::Byte) | Register(X86RegisterClass::Byte), _ @ Register(X86RegisterClass::Byte)] => 0x20,
+            [M @ Memory(Some(Byte)) | Register(Byte), R @ Register(Byte)] => 0x20,
         }
         Xor ("xor") {
-            [_ @ Memory(X86RegisterClass::Byte) | Register(X86RegisterClass::Byte), _ @ Register(X86RegisterClass::Byte)] => 0x30,
+            [M @ Memory(Some(Byte)) | Register(Byte), R @ Register(Byte)] => 0x30,
+            [M @ Memory(Some(Word)) | Register(Word) | Memory(Some(Double)) | Register(Double) | Memory(Some(Quad)) | Register(Quad), R @ Register(Word) | Register(Double) | Register(Quad)] => 0x31,
         }
         Mov ("mov") {
-            [_ @ Memory(X86RegisterClass::Byte) | Register(X86RegisterClass::Byte), _ @ Register(X86RegisterClass::Byte)] => 0x88,
+            [M @ Memory(Some(Byte)) | Register(Byte), R @ Register(Byte)] => 0x88,
+            [R @ Register(Word), I(Word) @ Immediate(Word)] => 0xB8,
+            [R @ Register(Double), I(Double) @ Immediate(Double)] => 0xB8,
+            [R @ Register(Quad), I(Double) @ Immediate(Double)] => 0xB8,
+            [M @ Memory(Some(Word)) | Register(Word) | Memory(Some(Double)) | Register(Double) | Memory(Some(Quad)) | Register(Quad), R @ Register(Word) | Register(Double) | Register(Quad)] => 0x89,
+            [R @ Register(Word) | Register(Double) | Register(Quad), M @ Memory(Some(Word)) | Register(Word) | Memory(Some(Double)) | Register(Double) | Memory(Some(Quad)) | Register(Quad)] => 0x8B,
         }
         Lea ("lea") {
-            [_ @ Register(X86RegisterClass::Word | X86RegisterClass::Double | X86RegisterClass::Quad), _ @  Memory(_)] => 0x8D,
+            [R @ Register(Word), M @  Memory(None)] => 0x8D,
+            [R @ Register(Double), M @  Memory(None)] => 0x8D,
+            [R @ Register(Quad), M @  Memory(None)] Long => 0x8D,
         }
         Call ("call") {
-            [_ @ RelAddr] => 0xE8,
+            [Rel(Word) @ RelAddr(GprSize::Word)] => 0xE8,
+            [Rel(Double) @ RelAddr(GprSize::Double)] => 0xE8,
         }
         Jump ("jmp") {
-            [_ @ RelAddr] => 0xE9,
+            [Rel(Word) @ RelAddr(GprSize::Word)] => 0xE9,
+            [Rel(Double) @ RelAddr(GprSize::Double)] => 0xE9,
         }
 
         Ud2 ("ud2") {
             [] => 0x0F0B
         }
         Push ("push") {
-            [dest @ Register(X86RegisterClass::Word | X86RegisterClass::Double | X86RegisterClass::Quad)] => 0x50 + (dest.regno() & 7),
+            [O @ Register(Word) | Register(Double) | Register(Quad)] => 0x50,
         }
         Pop ("pop") {
-            [dest @ Register(X86RegisterClass::Word | X86RegisterClass::Double | X86RegisterClass::Quad)] => 0x58 + (dest.regno() & 7),
+            [O @ Register(Word) | Register(Double) | Register(Quad)] => 0x58,
         }
         Ret ("ret") {
             [] => 0xC3,
-            [_ @ Immediate] => 0xC2
+            [I(Byte) @ Immediate(X86RegisterClass::Byte)] => 0xC2
         }
         Int3 ("int3") {
             [] => 0xCC
@@ -846,7 +1125,518 @@ x86_instructions! {
             [] => 0xCE
         }
         Int ("int") {
-            [_ @ Immediate] => 0xCD,
+            [I(Byte) @ Immediate(X86RegisterClass::Byte)] => 0xCD,
+        }
+    }
+}
+
+impl X86Opcode {
+    pub fn encode(instr: &Instruction, gmode: X86Mode) -> X86Instruction {
+        let mode = instr.mode_override().and_then(MachineMode::downcast).unwrap_or(gmode);
+
+        let opcode = instr.opcode_as::<Self>().unwrap();
+        let oprs = instr.operands();
+
+        let Some(op) = opcode.spec(oprs, mode) else {
+            panic!("Cannot encode {} in {mode}", PrettyPrinter(instr, &X86, MachineMode::new(mode)));
+        };
+
+        let [sse_prefix, escape0, escape1, opcode] = op.opcode.to_be_bytes();
+
+        let val = u16::from_be_bytes([escape0, escape1]);
+
+        let map: X86Map = unsafe { core::mem::transmute(val) };
+
+        let sse_prefix: Option<SsePrefix> = if sse_prefix != 0 {
+            Some(unsafe { core::mem::transmute(sse_prefix)})
+        } else {
+            None
+        };
+
+        let mut leg_prefix = None;
+        let mut seg_override = None;
+
+        for prefix in instr.prefixes() {
+            let prefix: X86Opcode = prefix.downcast().unwrap();
+
+            if !op.allowed_prefixes.contains(&prefix) {
+                panic!("Prefix {} is not allowed on this instruction", prefix.name());
+            }
+
+            match prefix {
+                X86Opcode::Lock => {leg_prefix.insert(LegacyPrefix::Lock);},
+                X86Opcode::Repnz => {leg_prefix.insert(LegacyPrefix::Repnz);},
+                X86Opcode::Repz => {leg_prefix.insert(LegacyPrefix::Repz);},
+                X86Opcode::Rep => {leg_prefix.insert(LegacyPrefix::Repz);}, // Repz/0xF3 is interpreted as REP on some instructions
+                X86Opcode::Wait => {leg_prefix.insert(LegacyPrefix::FWait);},
+                X86Opcode::BranchNotTaken => {seg_override.insert(SegmentOverride::BRANCH_NOT_TAKEN);},
+                X86Opcode::BranchTaken => {seg_override.insert(SegmentOverride::BRANCH_TAKEN);},
+                _ => unreachable!("Not a prefix")
+            }
+        }
+
+        let mut imm = None;
+        let mut imm_sym = None;
+
+        let mut rex = Rex::new();
+        let mut reg = None;
+        let mut rm = None;
+        let mut xmm_sz = None;
+
+        let force_xmm_sz = op.force_xmm_size;
+
+        let mut op_size = op.op_size.or_else(|| {
+            let mut op_sz = None;
+            for op in op.ops {
+                match op {
+                    Operand::Register(register) => {
+                        let Some(class) = register.downcast::<X86Register>().unwrap().gpr_size() else {continue};
+
+                        if let Some(sz) = op_sz {
+                            if sz!=class {
+                                panic!("Cannot encode instruction with different operand sizes");
+                            }
+                        } else {
+                            op_sz = Some(class);
+                        }
+                    },
+                    Operand::Memory(mem) => {
+                        let class = match mem.value_size {
+                            Some(1) => GprSize::Byte,
+                            Some(2) => GprSize::Word,
+                            Some(4) => GprSize::Double,
+                            Some(8) => GprSize::Quad,
+                            Some(v @ (16 | 32 | 64)) => {
+                                let xsz = match v {
+                                    16 => XmmSize::Xmm,
+                                    32 => XmmSize::Ymm,
+                                    64 => XmmSize::Zmm,
+                                    _ => unreachable!(),
+                                };
+                                if let Some(xmms) = xmm_sz {
+                                    if xsz == xmms {
+                                        panic!("Cannot encode instruction with different xmm sizes")
+                                    } else if force_xmm_sz.is_none() {
+                                        xmm_sz = Some(xsz);
+                                    }
+                                }
+
+                                continue
+                            }
+                            _ => continue
+                        };
+
+                        if let Some(sz) = op_sz {
+                            if sz!=class {
+                                panic!("Cannot encode instruction with different operand sizes");
+                            }
+                        } else {
+                            op_sz = Some(class);
+                        }
+                    },
+                   _ => {}
+                }
+            }
+
+            op_sz
+        });
+
+        let mut addr_size = op.addr_size;
+
+        let mut vec = None;
+
+        let mut opreg = None;
+
+        let mut is4_reg = None;
+
+        let mut kreg = None;
+
+        let mut is_vsib = false;
+
+        let mut use_byte_legacy = false;
+
+        let mut rm_is_gpr = false;
+
+        let mut mask_zero = false;
+
+        if let Some(ext) = op.op_ext {
+            reg = Some(ext);
+        }
+
+        for (op, enc) in op.ops.iter().zip(op.op_enc) {
+            match enc {
+                X86OperandEncoding::Imp => {},
+                X86OperandEncoding::ImpMemSrc => {
+                    match op {
+                        Operand::Memory(MemoryOperand{addr: Address{base: Some(reg), index: None, segment, disp: None, sym: None, rel: false, scale, }, ..}) => {
+                            if scale.get() != 1 {
+                                panic!("Cannot index this memory operand")
+                            }
+
+                            match segment.and_then(Register::downcast::<X86Register>) {
+                                Some(r) => {
+                                    seg_override = Some(SegmentOverride::from_sreg(r))
+                                }
+                                None => {}
+                            }
+
+                            let asize = match reg.downcast::<X86Register>().unwrap() {
+                                X86Register::Word(GprName::SI_REGNO) => {
+                                    GprSize::Word
+                                }
+                                X86Register::Double(GprName::SI_REGNO) => {
+                                    GprSize::Double
+                                }
+                                X86Register::Quad(GprName::SI_REGNO) => {
+                                    GprSize::Quad
+                                }
+                                r => panic!("Cannot refer to {r} in this instruction"),
+                            };
+
+                            if let Some(addr_size) = addr_size {
+                                if addr_size != asize {
+                                    panic!("Mixing address sizes in string instruction")
+                                }
+                            } else {
+                                addr_size = Some(asize);
+                            }
+                        }
+                        _ => unreachable!("Illegal operand for instruction")
+                    }
+                },
+                X86OperandEncoding::ImpMemDest => {
+                    match op {
+                        Operand::Memory(MemoryOperand{addr: Address{base: Some(reg), index: None, segment, disp: None, sym: None, rel: false, scale, }, ..}) => {
+                            if scale.get() != 1 {
+                                panic!("Cannot index this memory operand")
+                            }
+
+                            match segment.and_then(Register::downcast::<X86Register>) {
+                                Some(X86Register::Segment(0)) | None => {}
+                                Some(_) => panic!("Operand cannot have a segment other than es"),
+                            }
+
+                            let asize = match reg.downcast::<X86Register>().unwrap() {
+                                X86Register::Word(GprName::DI_REGNO) => {
+                                    GprSize::Word
+                                }
+                                X86Register::Double(GprName::DI_REGNO) => {
+                                    GprSize::Double
+                                }
+                                X86Register::Quad(GprName::DI_REGNO) => {
+                                    GprSize::Quad
+                                }
+                                r => panic!("Cannot refer to {r} in this instruction"),
+                            };
+
+                            if let Some(addr_size) = addr_size {
+                                if addr_size != asize {
+                                    panic!("Mixing address sizes in string instruction")
+                                }
+                            } else {
+                                addr_size = Some(asize);
+                            }
+                        }
+                        _ => unreachable!("Illegal operand for instruction")
+                    }
+                },
+                X86OperandEncoding::Rel(sz) => {
+                    match op {
+                        Operand::Immediate(val) => imm = Some((*val as i64, sz.bits())),
+                        Operand::RelSymbol(reloc_sym, disp) => {
+                            imm_sym = Some(*reloc_sym);
+                            imm = Some((disp.map_or(0, NonZero::get), sz.bits()));
+                        },
+                        _ => todo!("illegal")
+                    }
+                },
+                X86OperandEncoding::Moff64 => todo!(),
+                X86OperandEncoding::AbsPtr(gpr_size) => todo!(),
+                X86OperandEncoding::Abs(gpr_size)  | X86OperandEncoding::I(gpr_size) => {
+                    match op {
+                        Operand::Immediate(val) => imm = Some((*val as i64, gpr_size.bits())),
+                        Operand::AbsSymbol(reloc_sym, disp) => {
+                            imm_sym = Some(*reloc_sym);
+                            imm = Some((disp.map_or(0, NonZero::get), gpr_size.bits()));
+                        },
+                        _ => todo!("illegal")
+                    }
+                },
+                X86OperandEncoding::M => {
+                    match op {
+                        Operand::Register(register) => {
+                            let r = register.downcast::<X86Register>().unwrap();
+
+                            if matches!(r.class(), X86RegisterClass::Word | X86RegisterClass::Double | X86RegisterClass::Quad | X86RegisterClass::Byte | X86RegisterClass::ByteRex) {
+                                rm_is_gpr = true;
+                            } else if let X86Register::ByteLegacy(0..4) = r {
+                                rm_is_gpr = true;
+                            } else if let X86Register::ByteLegacy(_) = r {
+                                use_byte_legacy = true;
+                            }
+
+                            if let X86Register::ByteRex(4..) = r {
+                                rex.set_use_misc(true);
+                            }
+
+                            rex.set_base(r);
+
+                            rm = Some(Rm::Reg(X86RegnoR::from_register(r)));
+                        },
+                        Operand::Memory(mem) => {
+                            if let Some(reg) = mem.addr.segment {
+                                let reg = reg.downcast::<X86Register>().unwrap();
+                                seg_override = Some(SegmentOverride::from_sreg(reg));
+                            }
+
+                            let disp = Disp{sym: mem.addr.sym, disp: mem.addr.disp.map_or(0, NonZero::get).try_into().expect("Out of range displacement")};
+
+                            let rdisp = mem.addr.sym.zip(mem.addr.disp).map(|_| disp);
+
+                            rm = Some(match (mem.addr.base.and_then(Register::downcast::<X86Register>), mem.addr.index.and_then(Register::downcast::<X86Register>), mem.addr.scale.get(), mem.addr.rel) {
+                                (None, None, 1, true) => {
+                                    Rm::Rel(disp)
+                                }
+                                (None, None, 1, false) => {
+                                    Rm::Abs(disp)
+                                }
+                                (Some(X86Register::Word(base)), Some(X86Register::Word(index)), 1, false) => {
+                                    rm_is_gpr = true;
+                                    Rm::IndexLegacy(GprName::from_regno(base), GprName::from_regno(index), rdisp)
+                                }
+                                (Some(base @ (X86Register::Word(_) | X86Register::Double(_) | X86Register::Quad(_))), None, 1, false) => {
+                                    rm_is_gpr = true;
+                                    rex.set_base(base);
+
+                                    Rm::Mem(X86RegnoR::from_register(base), rdisp)
+                                }
+                                (Some(base @ (X86Register::Double(_) | X86Register::Quad(_))), Some(index @ (X86Register::Double(_) | X86Register::Quad(_))), s @ (1 | 2 | 4 | 8), false) => {
+                                    match (base, index) {
+                                        (_, X86Register::Double(GprName::SP_REGNO)|X86Register::Quad(GprName::SP_REGNO)) => panic!("Cannot index by SP"),
+                                        (X86Register::Double(_), X86Register::Double(_))|(X86Register::Quad(_), X86Register::Quad(_)) => {}
+                                        _ => panic!("Cannot mix {base}+{index} in memory operand")
+                                    }
+
+                                    rm_is_gpr = true;
+
+                                    rex.set_base(base);
+                                    rex.set_index(index);
+
+                                    let scale = s.trailing_zeros();
+
+                                    let sib = Sib::sib(Scale::from_bits(scale as u8), index, base);
+
+                                    Rm::Sib(sib, rdisp)
+                                }
+
+                                (None, Some(index @ (X86Register::Double(_) | X86Register::Quad(_))), s @ (1 | 2 | 4 | 8), false) => {
+                                    match (index) {
+                                        (X86Register::Double(GprName::SP_REGNO)|X86Register::Quad(GprName::SP_REGNO)) => panic!("Cannot index by SP"),
+                                        _ => {}
+                                    }
+
+                                    rex.set_index(index);
+
+                                    let scale = s.trailing_zeros();
+
+                                    let sib = Sib::index_only(Scale::from_bits(scale as u8), index);
+
+                                    rm_is_gpr = true;
+
+                                    Rm::Sib(sib, rdisp)
+                                }
+
+                                (Some(base @ (X86Register::Double(_) | X86Register::Quad(_))), Some(index @ (X86Register::Xmm(_) | X86Register::Ymm(_) | X86Register::Zmm(_))), s @ (1 | 2 | 4 | 8), false) => {
+
+                                    let sz = index.xmm_size().unwrap();
+
+                                    if Some(sz) != xmm_sz.or(force_xmm_sz) {
+                                        panic!("Cannot mix vsib sizes");
+                                    }
+
+                                    rex.set_base(base);
+                                    rex.set_index(index);
+
+                                    rm_is_gpr = true;
+                                    is_vsib = true;
+
+                                    let scale = s.trailing_zeros();
+
+                                    let sib = Sib::vsib(Scale::from_bits(scale as u8), index, base);
+
+                                    Rm::Sib(sib, rdisp)
+                                }
+
+                                (None, Some(index @ (X86Register::Xmm(_) | X86Register::Ymm(_) | X86Register::Zmm(_))), s @ (1 | 2 | 4 | 8), false) => {
+                                    let sz = index.xmm_size().unwrap();
+
+                                    if Some(sz) != xmm_sz.or(force_xmm_sz) {
+                                        panic!("Cannot mix vsib sizes");
+                                    }
+                                    rex.set_index(index);
+
+                                    let scale = s.trailing_zeros();
+
+                                    let sib = Sib::vindex_only(Scale::from_bits(scale as u8), index);
+
+                                    rm_is_gpr = true;
+                                    is_vsib = true;
+
+                                    Rm::Sib(sib, rdisp)
+                                }
+                                _ => panic!("Invalid register operand"),
+                            });
+                        },
+                        _ => panic!("Invalid operand for instruction")
+                        
+                    }
+                },
+                X86OperandEncoding::R => {
+                    match op {
+                        Operand::Register(register) => {
+                            let r = register.downcast::<X86Register>().unwrap();
+
+                            rex.set_reg(r);
+
+                            reg = Some(X86RegnoR::from_register(r));
+                        },
+                        _ => panic!("Invalid operand for instruction")
+                    }
+                },
+                X86OperandEncoding::O => {
+                    match op {
+                        Operand::Register(register) => {
+                            let r = register.downcast::<X86Register>().unwrap();
+
+                            rex.set_base(r);
+
+                            opreg = Some(X86RegnoR::from_register(r));
+                        },
+                        _ => panic!("Invalid operand for instruction")
+                    }
+                },
+                X86OperandEncoding::Im4 => {
+                    match op {
+                        Operand::Register(register) => {
+                            let r = register.downcast::<X86Register>().unwrap();
+
+                            is4_reg = Some(X86RegnoV::from_register(r));
+                        },
+                        _ => panic!("Invalid operand for instruction")
+                    }
+                },
+                X86OperandEncoding::V => {
+                    match op {
+                        Operand::Register(register) => {
+                            let r = register.downcast::<X86Register>().unwrap();
+
+                            vec = Some(X86RegnoV::from_register(r));
+                        },
+                        _ => panic!("Invalid operand for instruction")
+                    }
+                },
+                X86OperandEncoding::K => {
+                    match op {
+                        Operand::Register(register) => {
+                            let r = register.downcast::<X86Register>().unwrap();
+
+                            if r.regno() >= 8 {
+                                panic!("Cannot encode >8 registers in k field")
+                            }
+
+                            kreg = Some(X86RegnoR::from_register(r));
+                        },
+                        _ => panic!("Invalid operand for instruction")
+                    }
+                },
+            }
+        }
+
+        let rrex = if rex.need_rex() { Some(rex) } else { None };
+
+        let modrm = rm.map(|rm| ModRM{
+            rex: rrex,
+            reg: reg.unwrap_or(X86RegnoR::new(0)),
+            rm
+        });
+
+        let ops = 'a: {
+            for pfx in op.encoding_prefixes {
+                break 'a match (pfx, rex.is_rex2(), vec, modrm, opreg, is4_reg, kreg, is_vsib) {
+                    (X86EncodingPrefix::Default, _, None, None, None, None, None, false) => X86OpEncoding::None,
+                    (X86EncodingPrefix::Default, _, None, None, Some(opreg), None, None, false) => X86OpEncoding::OpReg(rex, opreg),
+                    (X86EncodingPrefix::Default, _, None, Some(modrm), None, None, None, false) => X86OpEncoding::ModRM(modrm),
+                    (X86EncodingPrefix::Vex { w }, false, vreg, Some(mut modrm), None, None, None, _) => {
+                        if let Some(vreg) = vreg {
+                            if vreg.get() > 15 {
+                                continue
+                            }
+                        }
+                        modrm.rex.get_or_insert_with(Rex::new).set_W(*w);
+                        X86OpEncoding::Vex(xmm_sz.unwrap_or(XmmSize::Xmm), vreg, modrm)
+                    },
+                    (X86EncodingPrefix::Vex { w }, false, Some(vreg), Some(mut modrm), None, Some(is4_reg), None, _) => {
+                        if vreg.get() > 15 {
+                            continue
+                        }
+                        modrm.rex.get_or_insert_with(Rex::new).set_W(*w);
+                        X86OpEncoding::VexIs4(xmm_sz.unwrap_or(XmmSize::Xmm), vreg, is4_reg, modrm)
+                    }
+                    (X86EncodingPrefix::Evex { evex_kind }, _,  vec, Some(mut modrm), None, None, kreg, is_vsib) => {
+
+                        let rex = modrm.rex.get_or_insert_with(Rex::new);
+
+                        if use_byte_legacy {
+
+                        }
+
+
+                        let evex = match (evex_kind, is_vsib) {
+                            (X86EvexEncodingKind::Avx512 { w, b }, false) => {
+                                rex.set_W(*w);
+
+                                EvexExtra::Avx512 { width: xmm_sz.unwrap_or(XmmSize::Xmm), k: kreg.unwrap_or(const{ X86RegnoR::new(0)}), z: mask_zero, b: *b, vec }
+                            },
+                            (X86EvexEncodingKind::Avx512 {w, b}, true) => {
+                                if vec.is_some() {
+                                    panic!("Cannot encode a V operand for a VSIB instruciton")
+                                }
+                                rex.set_W(*w);
+
+                                EvexExtra::EvexVidx { width: xmm_sz.unwrap_or(XmmSize::Xmm), k: kreg.unwrap_or(const{ X86RegnoR::new(0)}), z: mask_zero, b: *b }
+                            }
+                            (X86EvexEncodingKind::VexPromoted { w, nf }, false) => {
+                                rex.set_W(*w);
+
+                                EvexExtra::ExtVex { width: xmm_sz.unwrap_or(XmmSize::Xmm), nf: *nf, vec }
+                            },
+                            (X86EvexEncodingKind::LegacyPromoted { nf }, false) => {
+                                EvexExtra::ExtLegacy { nf: *nf, ndd: vec }
+                            },
+                            _ => panic!("Cannot encode vsib for this instruction")
+                        };
+
+                        X86OpEncoding::Evex(evex, modrm)
+                    }
+                    _ => continue
+                }
+            }
+            unreachable!()
+        };
+
+        X86Instruction { 
+            mode, 
+            legacy_prefix: leg_prefix, 
+            sprefix: seg_override, 
+            op_size: op.op_size.or(op_size), 
+            default_op_size: Some(op.def_op_size), 
+            addr_size: addr_size.unwrap_or_else(|| mode.largest_gpr()), 
+            map, 
+            sse_prefix, 
+            opcode, 
+            ops: ops, 
+            imm: imm,
+            immsym: imm_sym,
         }
     }
 }
@@ -1014,6 +1804,10 @@ impl MachineSpec for X86 {
         use crate::mach::CompilerWrapper;
 
         CompilerWrapper::from_spec(self)
+    }
+
+    fn as_encoder(&self) -> Option<&dyn crate::file::Encoder> {
+        Some(self)
     }
 }
 
